@@ -1,0 +1,30 @@
+<Window x:Class="JapaneseOcr.Overlay.OverlayWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="JapaneseOcr Overlay"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        Topmost="True"
+        ShowInTaskbar="False"
+        ResizeMode="NoResize"
+        IsHitTestVisible="True"
+        Visibility="Hidden"
+        WindowStartupLocation="Manual">
+
+    <!--
+        The Canvas is the drawing surface.  Each overlay box is rendered in
+        OnRender so we get a single paint pass rather than one WPF element per
+        word — this scales well to 200+ overlays.
+
+        Click-through logic: WM_NCHITTEST in code-behind returns HTTRANSPARENT
+        for points that are not inside a word box, so mouse events "fall through"
+        to the window below.  For points inside a box, HTCLIENT is returned and
+        WPF MouseDown handling copies the word.
+    -->
+    <Canvas x:Name="OverlayCanvas"
+            Background="Transparent"
+            IsHitTestVisible="True"
+            MouseMove="Canvas_MouseMove"
+            MouseLeftButtonDown="Canvas_MouseLeftButtonDown" />
+</Window>
