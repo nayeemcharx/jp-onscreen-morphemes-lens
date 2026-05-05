@@ -16,6 +16,9 @@ using Point              = System.Windows.Point;
 using Rect               = System.Windows.Rect;
 using Cursors             = System.Windows.Input.Cursors;
 using SolidColorBrush    = System.Windows.Media.SolidColorBrush;
+using LinearGradientBrush = System.Windows.Media.LinearGradientBrush;
+using GradientStop       = System.Windows.Media.GradientStop;
+using GradientStopCollection = System.Windows.Media.GradientStopCollection;
 using JapaneseOcr.Interfaces;
 using JapaneseOcr.Models;
 using JapaneseOcr.Services;
@@ -87,10 +90,24 @@ public sealed partial class OverlayWindow : Window, IOverlayWindow
     private CancellationTokenSource? _lookupCts;       // cancels in-flight lookups
 
     // Brush/pen caches for overlay drawing
-    private static readonly Brush     BoxFill   = CreateBrush(255, 215, 0, 0.18);
-    private static readonly Pen       BoxStroke = CreatePen(255, 215, 0, 0.80, thickness: 1.5);
-    private static readonly Brush     HovFill   = CreateBrush(255, 215, 0, 0.38);
-    private static readonly Pen       HovStroke = CreatePen(255, 255, 100, 0.95, thickness: 2.0);
+    //
+    // Idle: soft indigo/violet fill with a cool cyan border
+    // Hover: brighter blue-white fill with an electric-cyan border
+    private static readonly Brush BoxFill   = CreateGradientBrush(
+        Color.FromArgb(55,  90, 130, 210),   // top — medium indigo
+        Color.FromArgb(30,  50,  90, 170));  // bottom — deeper indigo
+    private static readonly Pen   BoxStroke = CreateFrozenPen(
+        Color.FromArgb(160,  80, 200, 240), thickness: 1.0);
+
+    private static readonly Brush HovFill   = CreateGradientBrush(
+        Color.FromArgb(120, 130, 200, 255),  // top — bright sky-blue
+        Color.FromArgb( 70,  60, 140, 230)); // bottom — deeper blue
+    private static readonly Pen   HovStroke = CreateFrozenPen(
+        Color.FromArgb(230,  80, 230, 255), thickness: 1.5);
+
+    // Thin top-edge highlight drawn inside each box to fake a glass sheen
+    private static readonly Brush ShineBase = CreateFrozenBrush(Color.FromArgb(60, 255, 255, 255));
+    private static readonly Brush ShineFade = CreateFrozenBrush(Color.FromArgb(0, 255, 255, 255));
 
     // ──────────────────────────────────────────────────────────────────────────
 
@@ -205,19 +222,36 @@ public sealed partial class OverlayWindow : Window, IOverlayWindow
     // overlays appear below the feedback label which is a Canvas child.
     private void RenderOverlays(DrawingContext dc)
     {
-        const double cornerRadius = 4.0;
+        const double rx = 5.0;
+        const double ry = 5.0;
 
         foreach (var ov in _overlays)
         {
-            var rect = ToCanvasRect(ov.ScreenBoundingBox);
+            var rect      = ToCanvasRect(ov.ScreenBoundingBox);
             bool isHovered = ReferenceEquals(ov, _hovered);
 
+            // Main fill + border
             dc.DrawRoundedRectangle(
-                brush:    isHovered ? HovFill   : BoxFill,
-                pen:      isHovered ? HovStroke : BoxStroke,
+                brush:     isHovered ? HovFill   : BoxFill,
+                pen:       isHovered ? HovStroke : BoxStroke,
                 rectangle: rect,
-                radiusX:  cornerRadius,
-                radiusY:  cornerRadius);
+                radiusX:   rx,
+                radiusY:   ry);
+
+            // Glass-shine: a narrow gradient strip along the top third of the box
+            double shineH = Math.Max(2.0, rect.Height * 0.35);
+            var shineRect = new Rect(rect.X + 3, rect.Y + 2, Math.Max(0, rect.Width - 6), shineH);
+
+            var shine = new LinearGradientBrush(
+                new GradientStopCollection
+                {
+                    new GradientStop(Color.FromArgb(isHovered ? (byte)80 : (byte)45, 255, 255, 255), 0.0),
+                    new GradientStop(Color.FromArgb(0, 255, 255, 255), 1.0),
+                },
+                startPoint: new Point(0, 0),
+                endPoint:   new Point(0, 1));
+
+            dc.DrawRoundedRectangle(shine, null, shineRect, rx - 1, ry - 1);
         }
     }
 
@@ -408,6 +442,35 @@ public sealed partial class OverlayWindow : Window, IOverlayWindow
 
     // ── Brush / Pen factories ─────────────────────────────────────────────────
 
+    private static Brush CreateGradientBrush(Color top, Color bottom)
+    {
+        var brush = new LinearGradientBrush(
+            new GradientStopCollection
+            {
+                new GradientStop(top,    0.0),
+                new GradientStop(bottom, 1.0),
+            },
+            startPoint: new Point(0, 0),
+            endPoint:   new Point(0, 1));
+        brush.Freeze();
+        return brush;
+    }
+
+    private static SolidColorBrush CreateFrozenBrush(Color c)
+    {
+        var b = new SolidColorBrush(c);
+        b.Freeze();
+        return b;
+    }
+
+    private static Pen CreateFrozenPen(Color c, double thickness)
+    {
+        var pen = new Pen(CreateFrozenBrush(c), thickness);
+        pen.Freeze();
+        return pen;
+    }
+
+    // Legacy helpers kept for any future callers
     private static Brush CreateBrush(byte r, byte g, byte b, double opacity)
     {
         var brush = new SolidColorBrush(Color.FromArgb((byte)(opacity * 255), r, g, b));
