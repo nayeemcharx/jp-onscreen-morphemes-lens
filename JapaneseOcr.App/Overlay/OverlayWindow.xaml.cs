@@ -91,23 +91,21 @@ public sealed partial class OverlayWindow : Window, IOverlayWindow
 
     // Brush/pen caches for overlay drawing
     //
-    // Idle: soft indigo/violet fill with a cool cyan border
-    // Hover: brighter blue-white fill with an electric-cyan border
-    private static readonly Brush BoxFill   = CreateGradientBrush(
-        Color.FromArgb(55,  90, 130, 210),   // top — medium indigo
-        Color.FromArgb(30,  50,  90, 170));  // bottom — deeper indigo
-    private static readonly Pen   BoxStroke = CreateFrozenPen(
-        Color.FromArgb(160,  80, 200, 240), thickness: 1.0);
+    // Glass-morphism style:
+    //   Idle  — frosted blue-white, subtle cyan rim
+    //   Hover — brighter ice-white fill, glowing white-cyan rim
 
-    private static readonly Brush HovFill   = CreateGradientBrush(
-        Color.FromArgb(120, 130, 200, 255),  // top — bright sky-blue
-        Color.FromArgb( 70,  60, 140, 230)); // bottom — deeper blue
-    private static readonly Pen   HovStroke = CreateFrozenPen(
-        Color.FromArgb(230,  80, 230, 255), thickness: 1.5);
+    // Outer border strokes
+    private static readonly Pen BoxStroke = CreateFrozenPen(
+        Color.FromArgb(130, 180, 220, 255), thickness: 1.0);
+    private static readonly Pen HovStroke = CreateFrozenPen(
+        Color.FromArgb(220, 220, 245, 255), thickness: 1.5);
 
-    // Thin top-edge highlight drawn inside each box to fake a glass sheen
-    private static readonly Brush ShineBase = CreateFrozenBrush(Color.FromArgb(60, 255, 255, 255));
-    private static readonly Brush ShineFade = CreateFrozenBrush(Color.FromArgb(0, 255, 255, 255));
+    // Inner glow ring (drawn 1 px inside the outer border)
+    private static readonly Pen BoxInner = CreateFrozenPen(
+        Color.FromArgb(50, 255, 255, 255), thickness: 1.0);
+    private static readonly Pen HovInner = CreateFrozenPen(
+        Color.FromArgb(90, 255, 255, 255), thickness: 1.0);
 
     // ──────────────────────────────────────────────────────────────────────────
 
@@ -222,36 +220,67 @@ public sealed partial class OverlayWindow : Window, IOverlayWindow
     // overlays appear below the feedback label which is a Canvas child.
     private void RenderOverlays(DrawingContext dc)
     {
-        const double rx = 5.0;
-        const double ry = 5.0;
+        const double rx = 7.0;
+        const double ry = 7.0;
 
         foreach (var ov in _overlays)
         {
-            var rect      = ToCanvasRect(ov.ScreenBoundingBox);
+            var r          = ToCanvasRect(ov.ScreenBoundingBox);
             bool isHovered = ReferenceEquals(ov, _hovered);
 
-            // Main fill + border
-            dc.DrawRoundedRectangle(
-                brush:     isHovered ? HovFill   : BoxFill,
-                pen:       isHovered ? HovStroke : BoxStroke,
-                rectangle: rect,
-                radiusX:   rx,
-                radiusY:   ry);
-
-            // Glass-shine: a narrow gradient strip along the top third of the box
-            double shineH = Math.Max(2.0, rect.Height * 0.35);
-            var shineRect = new Rect(rect.X + 3, rect.Y + 2, Math.Max(0, rect.Width - 6), shineH);
-
-            var shine = new LinearGradientBrush(
+            // ── 1. Base fill — frosted-glass body ─────────────────────────────
+            // Top-to-bottom: white-tinted blue fading to a deeper translucent blue.
+            var bodyFill = new LinearGradientBrush(
                 new GradientStopCollection
                 {
-                    new GradientStop(Color.FromArgb(isHovered ? (byte)80 : (byte)45, 255, 255, 255), 0.0),
+                    new GradientStop(isHovered
+                        ? Color.FromArgb(100, 200, 225, 255)   // hover — ice white-blue
+                        : Color.FromArgb( 55, 160, 200, 245),  // idle  — soft blue
+                        0.0),
+                    new GradientStop(isHovered
+                        ? Color.FromArgb( 70,  90, 150, 230)   // hover bottom
+                        : Color.FromArgb( 30,  60, 100, 200),  // idle bottom
+                        1.0),
+                },
+                startPoint: new Point(0, 0), endPoint: new Point(0, 1));
+
+            dc.DrawRoundedRectangle(bodyFill, null, r, rx, ry);
+
+            // ── 2. Specular highlight — top ~48 % of box ────────────────────
+            // A bright white gradient from opaque at the top edge to fully
+            // transparent at mid-height, simulating a light source above.
+            double specH = Math.Max(3.0, r.Height * 0.48);
+            var specRect = new Rect(r.X + 2, r.Y + 1, Math.Max(0, r.Width - 4), specH);
+            var specFill = new LinearGradientBrush(
+                new GradientStopCollection
+                {
+                    new GradientStop(Color.FromArgb(isHovered ? (byte)130 : (byte)80, 255, 255, 255), 0.0),
+                    new GradientStop(Color.FromArgb(isHovered ? (byte) 30 : (byte)15, 255, 255, 255), 0.55),
                     new GradientStop(Color.FromArgb(0, 255, 255, 255), 1.0),
                 },
-                startPoint: new Point(0, 0),
-                endPoint:   new Point(0, 1));
+                startPoint: new Point(0, 0), endPoint: new Point(0, 1));
 
-            dc.DrawRoundedRectangle(shine, null, shineRect, rx - 1, ry - 1);
+            dc.DrawRoundedRectangle(specFill, null, specRect, rx - 1, ry - 1);
+
+            // ── 3. Bottom rim light — faint glow along the lower edge ────────
+            double rimH = Math.Max(2.0, r.Height * 0.22);
+            var rimRect = new Rect(r.X + 3, r.Bottom - rimH - 1, Math.Max(0, r.Width - 6), rimH);
+            var rimFill = new LinearGradientBrush(
+                new GradientStopCollection
+                {
+                    new GradientStop(Color.FromArgb(0, 180, 220, 255), 0.0),
+                    new GradientStop(Color.FromArgb(isHovered ? (byte)55 : (byte)28, 180, 220, 255), 1.0),
+                },
+                startPoint: new Point(0, 0), endPoint: new Point(0, 1));
+
+            dc.DrawRoundedRectangle(rimFill, null, rimRect, rx - 2, ry - 2);
+
+            // ── 4. Outer border + inner glow ring ──────────────────────────
+            dc.DrawRoundedRectangle(null, isHovered ? HovStroke : BoxStroke, r, rx, ry);
+
+            // Inset inner-glow ring (1 px inside the outer border)
+            var inner = new Rect(r.X + 1.5, r.Y + 1.5, r.Width - 3, r.Height - 3);
+            dc.DrawRoundedRectangle(null, isHovered ? HovInner : BoxInner, inner, rx - 1, ry - 1);
         }
     }
 
