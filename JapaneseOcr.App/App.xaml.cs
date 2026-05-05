@@ -160,13 +160,16 @@ public partial class App : System.Windows.Application
         // Clipboard
         services.AddSingleton<IClipboardService, WindowsClipboardService>();
 
+        // LLM lookup
+        services.AddSingleton<ILookupService, LlmLookupService>();
+
         // Hotkey service
         services.AddSingleton<Win32HotkeyService>();
         services.AddSingleton<IHotkeyService>(sp => sp.GetRequiredService<Win32HotkeyService>());
 
         // Overlay window — must be created on UI thread; registered as singleton
         services.AddSingleton<OverlayWindow>(sp => new OverlayWindow(
-            sp.GetRequiredService<IClipboardService>(),
+            sp.GetRequiredService<ILookupService>(),
             sp.GetRequiredService<AppSettings>()));
         services.AddSingleton<IOverlayWindow>(sp =>
             sp.GetRequiredService<OverlayWindow>());

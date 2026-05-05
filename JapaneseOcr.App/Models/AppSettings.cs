@@ -49,6 +49,12 @@ public sealed class AppSettings
     public string SudachiServerUrl { get; set; } = "http://localhost:8000";
 
     /// <summary>
+    /// URL of the local LLM lookup server.
+    /// Start the server with: uvicorn main:app --port 8100 (see llm-server/).
+    /// </summary>
+    public string LlmServerUrl { get; set; } = "http://localhost:8100";
+
+    /// <summary>
     /// When false (default), punctuation-only tokens produce no overlay box.
     /// Punctuation is detected both by Unicode category and by the 補助記号 POS.
     /// </summary>

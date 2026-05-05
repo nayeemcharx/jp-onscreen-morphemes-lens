@@ -19,6 +19,7 @@ using SolidColorBrush    = System.Windows.Media.SolidColorBrush;
 using JapaneseOcr.Interfaces;
 using JapaneseOcr.Models;
 using JapaneseOcr.Services;
+using FontFamily = System.Windows.Media.FontFamily;
 
 namespace JapaneseOcr.Overlay;
 
@@ -65,7 +66,7 @@ public sealed partial class OverlayWindow : Window, IOverlayWindow
 
     // ──────────────────────────────────────────────────────────────────────────
 
-    private readonly IClipboardService              _clipboard;
+    private readonly ILookupService               _lookup;
     private readonly AppSettings                    _settings;
     private IReadOnlyList<WordOverlay>              _overlays   = [];
     private WordOverlay?                            _hovered;
@@ -78,9 +79,12 @@ public sealed partial class OverlayWindow : Window, IOverlayWindow
     private double _dpiScaleX = 1.0;
     private double _dpiScaleY = 1.0;
 
-    // Feedback popup shown after a word is copied
-    private readonly Label       _feedbackLabel;
-    private readonly DispatcherTimer _feedbackTimer;
+    // Lookup popup — shown when a word box is clicked
+    private readonly Border          _popupBorder;
+    private readonly TextBlock       _popupReading;    // hiragana line
+    private readonly TextBlock       _popupMeaning;    // English meaning line
+    private readonly DispatcherTimer _popupTimer;      // auto-dismiss
+    private CancellationTokenSource? _lookupCts;       // cancels in-flight lookups
 
     // Brush/pen caches for overlay drawing
     private static readonly Brush     BoxFill   = CreateBrush(255, 215, 0, 0.18);
@@ -90,38 +94,58 @@ public sealed partial class OverlayWindow : Window, IOverlayWindow
 
     // ──────────────────────────────────────────────────────────────────────────
 
-    public OverlayWindow(IClipboardService clipboard, AppSettings settings)
+    public OverlayWindow(ILookupService lookup, AppSettings settings)
     {
-        _clipboard = clipboard;
-        _settings  = settings;
+        _lookup   = lookup;
+        _settings = settings;
 
         InitializeComponent();
 
-        // Feedback label — positioned dynamically via Canvas.SetLeft/Top
-        _feedbackLabel = new Label
+        // ── Lookup popup ──────────────────────────────────────────────────────
+        // Two-line panel: hiragana reading (large) + English meaning (small).
+        // Positioned dynamically via Canvas.SetLeft/Top.
+        _popupReading = new TextBlock
         {
-            Background  = new SolidColorBrush(Color.FromArgb(220, 30, 30, 30)),
             Foreground  = Brushes.White,
-            FontSize    = 13,
-            Padding     = new Thickness(6, 2, 6, 2),
-            Visibility  = Visibility.Collapsed,
+            FontSize    = 18,
+            FontFamily  = new FontFamily("Meiryo, MS Gothic, Segoe UI"),
+            FontWeight  = FontWeights.Bold,
         };
-        OverlayCanvas.Children.Add(_feedbackLabel);
 
-        _feedbackTimer = new DispatcherTimer
+        _popupMeaning = new TextBlock
         {
-            Interval = TimeSpan.FromSeconds(1.5),
+            Foreground   = new SolidColorBrush(Color.FromArgb(220, 180, 220, 255)),
+            FontSize     = 12,
+            FontFamily   = new FontFamily("Segoe UI, Arial"),
+            TextWrapping = TextWrapping.Wrap,
+            MaxWidth     = 300,
+            Margin       = new Thickness(0, 4, 0, 0),
         };
-        _feedbackTimer.Tick += (_, _) =>
+
+        var stack = new StackPanel { Margin = new Thickness(10, 8, 10, 8) };
+        stack.Children.Add(_popupReading);
+        stack.Children.Add(_popupMeaning);
+
+        _popupBorder = new Border
         {
-            _feedbackTimer.Stop();
-            _feedbackLabel.Visibility = Visibility.Collapsed;
+            Background   = new SolidColorBrush(Color.FromArgb(235, 20, 20, 30)),
+            BorderBrush  = new SolidColorBrush(Color.FromArgb(180, 100, 160, 255)),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(8),
+            Child        = stack,
+            Visibility   = Visibility.Collapsed,
+        };
+        OverlayCanvas.Children.Add(_popupBorder);
+
+        _popupTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(6) };
+        _popupTimer.Tick += (_, _) =>
+        {
+            _popupTimer.Stop();
+            _popupBorder.Visibility = Visibility.Collapsed;
         };
 
         // Hook WM_NCHITTEST after the native window is created
         SourceInitialized += OnSourceInitialized;
-
-
     }
 
     // ── IOverlayWindow ────────────────────────────────────────────────────────
@@ -157,11 +181,16 @@ public sealed partial class OverlayWindow : Window, IOverlayWindow
     /// <inheritdoc/>
     public void HideOverlay()
     {
+        // Cancel any in-flight lookup
+        var cts = System.Threading.Interlocked.Exchange(ref _lookupCts, null);
+        cts?.Cancel();
+        cts?.Dispose();
+
         Visibility = Visibility.Hidden;
         _overlays  = [];
         _hovered   = null;
-        _feedbackTimer.Stop();
-        _feedbackLabel.Visibility = Visibility.Collapsed;
+        _popupTimer.Stop();
+        _popupBorder.Visibility = Visibility.Collapsed;
     }
 
     // ── Custom rendering ──────────────────────────────────────────────────────
@@ -215,9 +244,13 @@ public sealed partial class OverlayWindow : Window, IOverlayWindow
 
         if (selected is not null)
         {
-            string copyText = selected.GetCopyText(_settings.CopyDictionaryForm);
-            _clipboard.CopyText(copyText);
-            ShowCopiedFeedback(selected, pos);
+            // Cancel any previous in-flight lookup and start a new one
+            var prev = System.Threading.Interlocked.Exchange(ref _lookupCts, new CancellationTokenSource());
+            prev?.Cancel();
+            prev?.Dispose();
+
+            ShowLoadingPopup(selected, pos);
+            _ = DoLookupAsync(selected, pos, _lookupCts!.Token);
             e.Handled = true;
         }
         else
@@ -226,19 +259,63 @@ public sealed partial class OverlayWindow : Window, IOverlayWindow
         }
     }
 
-    // ── Feedback popup ────────────────────────────────────────────────────────
+    // ── Lookup popup helpers ──────────────────────────────────────────────────
 
-    private void ShowCopiedFeedback(WordOverlay overlay, Point canvasPos)
+    private void ShowLoadingPopup(WordOverlay overlay, Point canvasPos)
     {
-        _feedbackLabel.Content    = $"Copied: {overlay.SurfaceText}";
-        _feedbackLabel.Visibility = Visibility.Visible;
+        _popupReading.Text      = overlay.SurfaceText;
+        _popupMeaning.Text      = "…";
+        _popupBorder.Visibility = Visibility.Visible;
+        PositionPopup(canvasPos);
 
-        // Position the label just above the click point
-        Canvas.SetLeft(_feedbackLabel, canvasPos.X);
-        Canvas.SetTop (_feedbackLabel, Math.Max(0, canvasPos.Y - 30));
+        _popupTimer.Stop();
+        _popupTimer.Start();
+    }
 
-        _feedbackTimer.Stop();
-        _feedbackTimer.Start();
+    private async Task DoLookupAsync(WordOverlay overlay, Point canvasPos, CancellationToken ct)
+    {
+        var result = await _lookup.LookupAsync(overlay.SurfaceText, ct);
+
+        if (ct.IsCancellationRequested)
+            return;
+
+        if (result is not null)
+        {
+            // Show "word [reading]" if the hiragana differs from the surface text
+            bool hasDifferentReading = !string.IsNullOrWhiteSpace(result.Hiragana)
+                                       && result.Hiragana != overlay.SurfaceText;
+
+            _popupReading.Text = hasDifferentReading
+                ? $"{overlay.SurfaceText}  [{result.Hiragana}]"
+                : overlay.SurfaceText;
+
+            _popupMeaning.Text = result.Meaning;
+        }
+        else
+        {
+            _popupMeaning.Text = "(lookup failed — is the LLM server running?)";
+        }
+
+        // Re-start the auto-dismiss timer so it counts from when the result arrived
+        _popupTimer.Stop();
+        _popupTimer.Start();
+    }
+
+    private void PositionPopup(Point canvasPos)
+    {
+        // Force a layout pass so ActualWidth/Height are valid
+        _popupBorder.Measure(new System.Windows.Size(double.PositiveInfinity, double.PositiveInfinity));
+
+        double left = canvasPos.X;
+        double top  = Math.Max(0, canvasPos.Y - _popupBorder.DesiredSize.Height - 8);
+
+        // Clamp so the popup doesn't go off the right edge
+        double maxLeft = ActualWidth - _popupBorder.DesiredSize.Width - 4;
+        if (left > maxLeft && maxLeft > 0)
+            left = maxLeft;
+
+        Canvas.SetLeft(_popupBorder, left);
+        Canvas.SetTop (_popupBorder, top);
     }
 
     // ── Win32 click-through (WM_NCHITTEST hook) ───────────────────────────────
