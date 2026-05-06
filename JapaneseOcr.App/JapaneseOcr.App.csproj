@@ -13,6 +13,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- PerMonitorV2 DPI awareness (replaces legacy manifest entries; avoids WFAC010) -->
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <RootNamespace>JapaneseOcr</RootNamespace>
     <AssemblyName>JapaneseOcr</AssemblyName>
     <StartupObject>JapaneseOcr.App</StartupObject>
