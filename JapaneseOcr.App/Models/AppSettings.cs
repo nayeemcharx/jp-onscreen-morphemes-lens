@@ -40,6 +40,25 @@ public sealed class AppSettings
     /// </summary>
     public bool OcrSharpening { get; set; } = false;
 
+    /// <summary>
+    /// When true (default), the captured frame is converted to grayscale using
+    /// ITU-R BT.709 luminance weights (Y = 0.2126 R + 0.7152 G + 0.0722 B)
+    /// before being fed to the OCR engine.
+    ///
+    /// Why this helps:
+    ///   GDI CopyFromScreen captures ClearType-rendered text with coloured
+    ///   sub-pixel fringes (R/G/B edge hinting). When the OCR engine converts
+    ///   the image to grayscale internally it may weight channels differently,
+    ///   turning those fringes into spurious bright or dark pixels that confuse
+    ///   character boundary detection.  Pre-converting with correct luminance
+    ///   weights makes the fringes collapse to the proper perceptual gray value,
+    ///   yielding cleaner strokes and more accurate bounding rectangles.
+    ///
+    ///   Disable only if you are using a non-GDI capture source (e.g. WGC) that
+    ///   already provides alpha-correct, fringe-free pixels.
+    /// </summary>
+    public bool OcrGrayscale { get; set; } = true;
+
     // ── Tokenizer ─────────────────────────────────────────────────────────────
 
     /// <summary>

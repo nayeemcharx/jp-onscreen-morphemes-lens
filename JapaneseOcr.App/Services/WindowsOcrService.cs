@@ -64,7 +64,8 @@ public sealed class WindowsOcrService : IOcrService
 
         bool needsPreprocess = ocrScale != 1.0
             || _settings.OcrContrast  != 1.0f
-            || _settings.OcrSharpening;
+            || _settings.OcrSharpening
+            || _settings.OcrGrayscale;
 
         if (needsPreprocess)
             _logger.LogInformation(
@@ -78,7 +79,8 @@ public sealed class WindowsOcrService : IOcrService
                 frame.Image,
                 ocrScale,
                 contrastFactor: _settings.OcrContrast,
-                sharpen:        _settings.OcrSharpening)
+                sharpen:        _settings.OcrSharpening,
+                grayscale:      _settings.OcrGrayscale)
             : null;
 
         var bitmapForOcr = preprocessed ?? frame.Image;
@@ -89,10 +91,14 @@ public sealed class WindowsOcrService : IOcrService
                 : "Running OCR on {W}×{H} image (raw, no preprocessing)",
             bitmapForOcr.Width, bitmapForOcr.Height, ocrScale);
 
+        SaveDebugImage(bitmapForOcr);
+
         using var softwareBitmap = await ConvertToSoftwareBitmapAsync(bitmapForOcr);
         preprocessed?.Dispose();
 
         ct.ThrowIfCancellationRequested();
+
+
 
         // Run OCR (WinRT async)
         var rawResult = await _engine.RecognizeAsync(softwareBitmap);
@@ -111,6 +117,25 @@ public sealed class WindowsOcrService : IOcrService
     // ──────────────────────────────────────────────────────────────────────────
     // Private helpers
     // ──────────────────────────────────────────────────────────────────────────
+
+    private void SaveDebugImage(System.Drawing.Bitmap bitmap)
+    {
+        try
+        {
+            var dir = Path.GetFullPath(
+                Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "images"));
+            Directory.CreateDirectory(dir);
+
+            var fileName = $"ocr_{DateTime.Now:yyyyMMdd_HHmmss_fff}.png";
+            var filePath = Path.Combine(dir, fileName);
+            bitmap.Save(filePath, System.Drawing.Imaging.ImageFormat.Png);
+            _logger.LogDebug("Debug image saved → {Path}", filePath);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to save debug image");
+        }
+    }
 
     private OcrEngine CreateEngine()
     {

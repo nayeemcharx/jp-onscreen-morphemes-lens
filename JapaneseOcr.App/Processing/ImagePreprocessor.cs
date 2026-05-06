@@ -50,20 +50,39 @@ public static class ImagePreprocessor
     /// Apply a mild 3×3 unsharp-mask after scaling.
     /// Disabled by default — creates noise around fine Japanese strokes.
     /// </param>
+    /// <param name="grayscale">
+    /// Convert to grayscale using BT.709 luminance weights before OCR.
+    /// Eliminates ClearType sub-pixel colour fringes that degrade recognition.
+    /// </param>
     /// <returns>A preprocessed bitmap ready for OCR.</returns>
     public static Bitmap Preprocess(
         Bitmap source,
         double scale,
         float  contrastFactor = 1.0f,
-        bool   sharpen        = false)
+        bool   sharpen        = false,
+        bool   grayscale      = false)
     {
         // Step 1: Ensure 24-bit RGB (OCR engines prefer simple RGB)
         var rgb = ConvertToRgb(source);
 
         // Step 2: Upscale (if requested) using high-quality bicubic interpolation
         Bitmap scaled = scale != 1.0 ? Resize(rgb, scale) : rgb;
-        if (!ReferenceEquals(rgb, source))
+        // Dispose rgb only when it is a distinct intermediate bitmap — i.e. it
+        // was freshly created by ConvertToRgb AND the resize produced a separate
+        // object.  When scale==1.0, scaled==rgb; disposing rgb here would leave
+        // scaled pointing to a dead object (the source of the crash).
+        if (!ReferenceEquals(rgb, source) && !ReferenceEquals(rgb, scaled))
             rgb.Dispose();
+
+        // Step 2.5 (opt-in): Grayscale conversion using BT.709 luminance weights.
+        // Done after resize so bicubic interpolation benefits from full colour data.
+        if (grayscale)
+        {
+            var grey = ConvertToGrayscale(scaled);
+            if (!ReferenceEquals(scaled, source))
+                scaled.Dispose();
+            scaled = grey;
+        }
 
         // Step 3 (opt-in): Boost contrast — disabled by default for screen text
         if (contrastFactor != 1.0f)
@@ -88,6 +107,39 @@ public static class ImagePreprocessor
     // ──────────────────────────────────────────────────────────────────────────
     // Pipeline steps (public so they can be tested or reused independently)
     // ──────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Converts a bitmap to grayscale using ITU-R BT.709 luminance weights
+    /// (Y = 0.2126 R + 0.7152 G + 0.0722 B).
+    ///
+    /// Using the standard luminance coefficients ensures that ClearType
+    /// sub-pixel colour fringes are collapsed to their correct perceptual
+    /// gray value rather than appearing as spurious bright/dark edge pixels
+    /// when the OCR engine performs its own internal channel averaging.
+    /// </summary>
+    public static Bitmap ConvertToGrayscale(Bitmap source)
+    {
+        // BT.709 row-vector × ColorMatrix:
+        //   Each output channel R=G=B = 0.2126*R_in + 0.7152*G_in + 0.0722*B_in
+        var cm = new ColorMatrix(
+        [
+            [0.2126f, 0.2126f, 0.2126f, 0f, 0f],
+            [0.7152f, 0.7152f, 0.7152f, 0f, 0f],
+            [0.0722f, 0.0722f, 0.0722f, 0f, 0f],
+            [0f,      0f,      0f,      1f, 0f],
+            [0f,      0f,      0f,      0f, 1f],
+        ]);
+
+        var attributes = new ImageAttributes();
+        attributes.SetColorMatrix(cm, ColorMatrixFlag.Default, ColorAdjustType.Bitmap);
+
+        var result   = new Bitmap(source.Width, source.Height, PixelFormat.Format24bppRgb);
+        using var g  = Graphics.FromImage(result);
+        var destRect = new Rectangle(0, 0, source.Width, source.Height);
+        g.DrawImage(source, destRect, 0, 0, source.Width, source.Height,
+                    GraphicsUnit.Pixel, attributes);
+        return result;
+    }
 
     public static Bitmap ConvertToRgb(Bitmap source)
     {
