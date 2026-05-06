@@ -47,6 +47,18 @@
 
     <!-- MeCab morphological analysis (bundles IPAdic dictionary) -->
     <PackageReference Include="MeCab.DotNet" Version="1.2.0" />
+
+    <!-- PaddleOCR ONNX inference -->
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.17.3" />
+    <PackageReference Include="OpenCvSharp4" Version="4.9.0.20240103" />
+    <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.9.0.20240103" />
+  </ItemGroup>
+
+  <!-- PaddleOCR model files: place det_model.onnx, rec_model.onnx, cls_model.onnx,
+       and japan_dict.txt in JapaneseOcr.App\models\paddle\ then rebuild. -->
+  <ItemGroup>
+    <Content Include="models\paddle\**" CopyToOutputDirectory="PreserveNewest"
+             Condition="Exists('models\paddle')" />
   </ItemGroup>
 
 </Project>

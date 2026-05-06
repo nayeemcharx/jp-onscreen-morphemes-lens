@@ -128,4 +128,24 @@ public sealed class AppSettings
     /// Multi-monitor support is designed in data structures but not yet wired up.
     /// </summary>
     public bool PrimaryMonitorOnly { get; set; } = true;
+
+    // ── PaddleOCR ─────────────────────────────────────────────────────────────
+    // Paths are resolved relative to the executable directory when not rooted.
+    // Place models in JapaneseOcr.App\models\paddle\ and rebuild so they are
+    // copied to the output directory, or set absolute paths here.
+
+    /// <summary>Path to the PP-OCRv3/v4 DB text detection model (ONNX).</summary>
+    public string PaddleDetModelPath { get; set; } = @"models\paddle\det_model.onnx";
+
+    /// <summary>Path to the Japanese CRNN recognition model (ONNX).</summary>
+    public string PaddleRecModelPath { get; set; } = @"models\paddle\rec_model.onnx";
+
+    /// <summary>
+    /// Path to the optional angle classification model (ONNX).
+    /// Leave as-is; if the file does not exist the step is silently skipped.
+    /// </summary>
+    public string PaddleClsModelPath { get; set; } = @"models\paddle\cls_model.onnx";
+
+    /// <summary>Path to the Japanese character dictionary (one entry per line).</summary>
+    public string PaddleDictPath { get; set; } = @"models\paddle\japan_dict.txt";
 }
