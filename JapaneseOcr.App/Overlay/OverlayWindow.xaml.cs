@@ -344,12 +344,14 @@ public sealed partial class OverlayWindow : Window, IOverlayWindow
 
         if (result is not null)
         {
-            // Show "word [reading]" if the hiragana differs from the surface text
-            bool hasDifferentReading = !string.IsNullOrWhiteSpace(result.Hiragana)
-                                       && result.Hiragana != overlay.SurfaceText;
+            // Show "word [reading]" if the hiragana reading differs from the surface text.
+            // Reading comes from the MeCab tokenizer (WordOverlay.Reading); Google Translate
+            // no longer supplies a hiragana field.
+            bool hasDifferentReading = !string.IsNullOrWhiteSpace(overlay.Reading)
+                                       && overlay.Reading != overlay.SurfaceText;
 
             _popupReading.Text = hasDifferentReading
-                ? $"{overlay.SurfaceText}  [{result.Hiragana}]"
+                ? $"{overlay.SurfaceText}  [{overlay.Reading}]"
                 : overlay.SurfaceText;
 
             _popupMeaning.Text = result.Meaning;

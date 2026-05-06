@@ -23,6 +23,12 @@ public sealed class JapaneseToken
     /// </summary>
     public string PartOfSpeech     { get; init; } = string.Empty;
 
+    /// <summary>
+    /// Hiragana reading of the token (e.g. "たべる" for "食べる").
+    /// Empty when the tokenizer does not provide reading information.
+    /// </summary>
+    public string Reading          { get; init; } = string.Empty;
+
     /// <summary>Inclusive start index into the normalized line text.</summary>
     public int    StartCharIndex   { get; init; }
 

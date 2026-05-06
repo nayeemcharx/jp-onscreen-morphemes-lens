@@ -149,10 +149,10 @@ public partial class App : System.Windows.Application
         // To swap: replace WindowsOcrService with your implementation
         services.AddSingleton<IOcrService, WindowsOcrService>();
 
-        // Japanese tokenizer — Sudachi via local FastAPI server (tokenizer-server/).
-        // Falls back gracefully (empty token list) if the server is not running.
-        // To revert to the built-in stub: replace SudachiHttpTokenizer with StubJapaneseTokenizer.
-        services.AddSingleton<IJapaneseTokenizer, SudachiHttpTokenizer>();
+        // Japanese tokenizer — MeCab via MeCab.DotNet (IPAdic bundled, no external server needed).
+        // To use the Sudachi HTTP server instead: replace MeCabTokenizer with SudachiHttpTokenizer.
+        // To use the built-in stub (no analysis): replace with StubJapaneseTokenizer.
+        services.AddSingleton<IJapaneseTokenizer, MeCabTokenizer>();
 
         // Token→box mapping
         services.AddSingleton<ITokenBoxMapper, TokenBoxMapper>();
@@ -161,7 +161,8 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IClipboardService, WindowsClipboardService>();
 
         // LLM lookup
-        services.AddSingleton<ILookupService, LlmLookupService>();
+        // To use the local LLM server instead: replace GoogleTranslateLookupService with LlmLookupService.
+        services.AddSingleton<ILookupService, GoogleTranslateLookupService>();
 
         // Hotkey service
         services.AddSingleton<Win32HotkeyService>();

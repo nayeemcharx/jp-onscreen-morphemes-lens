@@ -18,6 +18,12 @@ public sealed class WordOverlay
     public string    PartOfSpeech       { get; init; } = string.Empty;
 
     /// <summary>
+    /// Hiragana reading of the word as provided by the tokenizer (e.g. MeCab IPAdic).
+    /// Empty when the tokenizer does not supply reading information.
+    /// </summary>
+    public string    Reading            { get; init; } = string.Empty;
+
+    /// <summary>
     /// Bounding box in absolute physical screen pixel coordinates.
     /// (0,0) is the top-left of the primary monitor for standard setups.
     /// </summary>

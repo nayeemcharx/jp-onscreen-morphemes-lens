@@ -69,6 +69,7 @@ public sealed class SudachiHttpTokenizer : IJapaneseTokenizer
                     DictionaryForm = t.DictionaryForm,
                     // Combine main POS and sub-category so filters can match
                     // either level, e.g. "助詞" or "助詞-格助詞".
+                    Reading        = t.Reading,
                     PartOfSpeech   = string.IsNullOrEmpty(t.PartOfSpeechDetail)
                         ? t.PartOfSpeech
                         : $"{t.PartOfSpeech}-{t.PartOfSpeechDetail}",

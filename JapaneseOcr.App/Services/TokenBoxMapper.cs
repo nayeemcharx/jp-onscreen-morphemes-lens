@@ -94,6 +94,7 @@ public sealed class TokenBoxMapper : ITokenBoxMapper
                 SurfaceText       = token.SurfaceText,
                 DictionaryForm    = token.DictionaryForm,
                 PartOfSpeech      = token.PartOfSpeech,
+                Reading           = token.Reading,
                 ScreenBoundingBox = paddedBox,
                 SourceLineText    = line.Text,
                 Confidence        = line.Confidence,

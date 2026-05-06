@@ -42,6 +42,9 @@
 
     <!-- GDI+ image manipulation (screen capture, preprocessing) -->
     <PackageReference Include="System.Drawing.Common" Version="8.0.0" />
+
+    <!-- MeCab morphological analysis (bundles IPAdic dictionary) -->
+    <PackageReference Include="MeCab.DotNet" Version="1.2.0" />
   </ItemGroup>
 
 </Project>
