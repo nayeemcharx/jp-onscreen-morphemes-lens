@@ -1,4 +1,4 @@
-# Japanese OCR Overlay
+﻿# JPLens
 
 A lightweight Windows desktop app that captures your screen on demand, detects Japanese text, and renders a transparent clickable overlay. Click any word box to copy it to your clipboard instantly.
 
@@ -8,9 +8,9 @@ A lightweight Windows desktop app that captures your screen on demand, detects J
 
 ## Quick Start
 
-1. Go to the [Releases](../../releases) page and download the latest `JapaneseOcr.zip`.
+1. Go to the [Releases](../../releases) page and download the latest `JPLens.zip`.
 2. Extract the zip anywhere — no installer needed.
-3. Run `JapaneseOcr.App.exe`.
+3. Run `JPLens.exe`.
 4. A tray icon appears in the system tray to confirm the app is running.
 
 **That's it.** The app runs silently in the background until you need it.
@@ -88,8 +88,8 @@ You should see `日本語` in the list.
 ## Project Structure
 
 ```
-JapaneseOcr.sln
-├── JapaneseOcr.App/
+JPLens.sln
+├── JPLens.App/
 │   ├── App.xaml / App.xaml.cs          — Application entry point, DI setup
 │   ├── app.manifest                    — PerMonitorV2 DPI, Windows 10/11 compat
 │   ├── AppController.cs                — Pipeline orchestrator
@@ -133,7 +133,7 @@ JapaneseOcr.sln
 │       ├── OverlayWindow.xaml          — Borderless transparent WPF window
 │       └── OverlayWindow.xaml.cs      — Rendering + WM_NCHITTEST click-through
 │
-└── JapaneseOcr.Tests/
+└── JPLens.Tests/
     ├── TokenizerIndexMappingTests.cs
     ├── TokenFilteringTests.cs
     ├── RectangleUnionTests.cs
@@ -148,22 +148,22 @@ JapaneseOcr.sln
 ```bash
 # Restore & build
 dotnet restore
-dotnet build JapaneseOcr.sln
+dotnet build JPLens.sln
 
 # Run
-dotnet run --project JapaneseOcr.App
+dotnet run --project JPLens.App
 
 # Run tests
-dotnet test JapaneseOcr.Tests
+dotnet test JPLens.Tests
 ```
 
-Or open `JapaneseOcr.sln` in Visual Studio 2022 and press F5.
+Or open `JPLens.sln` in Visual Studio 2022 and press F5.
 
 ---
 
 ## Usage
 
-1. Launch `JapaneseOcr.exe` — a tray icon appears.
+1. Launch `JPLens.exe` — a tray icon appears.
 2. Open any application with Japanese text (game, browser, video player, etc.).
 3. Press **Ctrl+Shift+J**.
 4. Gold overlay boxes appear over each detected word.
@@ -175,7 +175,7 @@ Or open `JapaneseOcr.sln` in Visual Studio 2022 and press F5.
 
 ## Configuration
 
-Settings are stored at `%AppData%\JapaneseOcr\settings.json`. Edit manually or
+Settings are stored at `%AppData%\JPLens\settings.json`. Edit manually or
 wait for the settings UI in Phase 7.
 
 ```json
@@ -316,7 +316,7 @@ public sealed class SudachiTokenizer : IJapaneseTokenizer
 
 ## Logs
 
-Log files are written to `%AppData%\JapaneseOcr\Logs\japaneseocr-YYYYMMDD.log`.
+Log files are written to `%AppData%\JPLens\Logs\jplens-YYYYMMDD.log`.
 The last 7 days of logs are retained.
 
 ---
