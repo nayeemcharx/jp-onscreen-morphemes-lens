@@ -63,7 +63,7 @@ public partial class App : System.Windows.Application
         Directory.CreateDirectory(logDir);
 
         Log.Logger = new LoggerConfiguration()
-            .MinimumLevel.Debug()
+            .MinimumLevel.Information()
             .WriteTo.File(
                 path:            Path.Combine(logDir, "japaneseocr-.log"),
                 rollingInterval: RollingInterval.Day,

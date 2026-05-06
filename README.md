@@ -1,28 +1,51 @@
 # Japanese OCR Overlay
 
-A production-grade Windows desktop application that captures your screen on demand, detects Japanese text via OCR, tokenizes it into words, and renders transparent clickable overlay boxes. Click any box to copy the word to the clipboard.
+A lightweight Windows desktop app that captures your screen on demand, detects Japanese text, and renders a transparent clickable overlay. Click any word box to copy it to your clipboard instantly.
+
+![Demo](images/demo.gif)
 
 ---
 
-## Features
+## Quick Start
 
-| Feature | Status |
+1. Go to the [Releases](../../releases) page and download the latest `JapaneseOcr.zip`.
+2. Extract the zip anywhere — no installer needed.
+3. Run `JapaneseOcr.App.exe`.
+4. A tray icon appears in the system tray to confirm the app is running.
+
+**That's it.** The app runs silently in the background until you need it.
+
+---
+
+## Usage
+
+| Action | Result |
 |---|---|
-| Global hotkey (Ctrl+Shift+J) | ✅ Phase 1 |
-| GDI screen capture | ✅ Phase 1 |
-| Windows.Media.Ocr (built-in Japanese OCR) | ✅ Phase 2 |
-| Stub Japanese tokenizer (script-group segmentation) | ✅ Phase 3 |
-| Transparent always-on-top WPF overlay | ✅ Phase 4 |
-| Word-level boxes (char box union + fallback estimation) | ✅ Phase 5 |
-| Click-to-copy + hover cursor + copied feedback | ✅ Phase 6 |
-| ESC to hide overlay | ✅ Phase 6 |
-| System tray icon | ✅ Phase 6 |
-| Settings JSON persistence | ✅ |
-| Per-monitor DPI awareness (PerMonitorV2) | ✅ |
-| MeCab / Sudachi tokenizer swap | 🔲 Phase 7 |
-| Settings UI | 🔲 Phase 7 |
-| Multi-monitor support | 🔲 Phase 7 |
-| DXGI Desktop Duplication capture | 🔲 Phase 7 |
+| `Ctrl+Shift+J` | Scan the screen and show the word overlay |
+| `Ctrl+Shift+J` again | Dismiss the overlay |
+| Click a word box | Copy the word to your clipboard |
+| `Esc` | Dismiss the overlay |
+| Right-click tray icon | Exit the application |
+
+---
+
+## Requirements
+
+- **Windows 10 1803** or later (build 17134+)
+- **Japanese OCR language pack** installed
+
+### Install the Japanese language pack
+
+**Option A — Windows Settings:**
+```
+Settings → Time & language → Language & region → Add a language → 日本語
+Ensure the "OCR" optional feature is checked.
+```
+
+**Option B — Command line (elevated):**
+```cmd
+dism /Online /Add-Capability /CapabilityName:Language.OCR~~~ja-JP~0.0.1.0
+```
 
 ---
 

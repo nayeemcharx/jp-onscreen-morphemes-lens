@@ -76,6 +76,5 @@ wheels/
 
 # Pytest cache
 .pytest_cache/
-images/
 paddle/
 publish/
