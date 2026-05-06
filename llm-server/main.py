@@ -31,6 +31,8 @@ from pathlib import Path
 import anthropic
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
+from deep_translator import GoogleTranslator
+import pykakasi
 
 load_dotenv()
 from pydantic import BaseModel
@@ -200,7 +202,7 @@ async def _call_claude(word: str) -> dict[str, str]:
 # Endpoints
 # ---------------------------------------------------------------------------
 
-@app.post("/lookup", response_model=LookupResponse)
+@app.post("/lookup/claude", response_model=LookupResponse)
 async def lookup_word(req: LookupRequest) -> LookupResponse:
     """
     Look up a Japanese word.
@@ -264,6 +266,79 @@ async def lookup_word(req: LookupRequest) -> LookupResponse:
         meaning=result["meaning"],
         lookup_count=1,
     )
+
+
+@app.post("/lookup", response_model=LookupResponse)
+async def lookup_word_google(req: LookupRequest) -> LookupResponse:
+    """
+    Look up a Japanese word using Google Translate (meaning) and pykakasi (hiragana).
+
+    Same request/response shape as POST /lookup, but does not use Claude.
+    Results are cached in the same SQLite table; cache hits skip translation.
+    """
+    word = req.word.strip()
+    if not word:
+        raise HTTPException(status_code=422, detail="'word' must not be empty")
+
+    log.info("Google lookup request: %r", word)
+
+    db  = _get_db()
+    # Use a different key prefix so google results are cached separately
+    key = "google:" + _word_hash(word)
+
+    # ── Cache hit ──────────────────────────────────────────────────────────
+    try:
+        row = db.execute(
+            "SELECT hiragana, meaning, lookup_count FROM word_cache WHERE word_hash = ?",
+            (key,),
+        ).fetchone()
+    except sqlite3.Error as exc:
+        log.exception("DB read failed for word %r", word)
+        raise HTTPException(status_code=500, detail=f"Database error: {exc}")
+
+    if row is not None:
+        hiragana, meaning, count = row
+        new_count = count + 1
+        try:
+            db.execute(
+                "UPDATE word_cache SET lookup_count = ? WHERE word_hash = ?",
+                (new_count, key),
+            )
+            db.commit()
+        except sqlite3.Error as exc:
+            log.warning("DB update failed for word %r: %s", word, exc)
+        log.info("Cache hit (google) for %r (count=%d)", word, new_count)
+        return LookupResponse(hiragana=hiragana, meaning=meaning, lookup_count=new_count)
+
+    # ── Cache miss — translate + convert ──────────────────────────────────
+    log.info("Cache miss (google) for %r — translating", word)
+
+    # Hiragana via pykakasi
+    kks = pykakasi.kakasi()
+    result_kks = kks.convert(word)
+    hiragana = "".join(item["hira"] for item in result_kks)
+
+    # English meaning via deep-translator (Google Translate)
+    try:
+        meaning = GoogleTranslator(source="ja", target="en").translate(word)
+    except Exception as exc:
+        log.warning("Google Translate failed for %r: %s", word, exc)
+        meaning = "unknown"
+
+    try:
+        db.execute(
+            """
+            INSERT INTO word_cache (word_hash, word, hiragana, meaning, lookup_count)
+            VALUES (?, ?, ?, ?, 1)
+            """,
+            (key, word, hiragana, meaning),
+        )
+        db.commit()
+    except sqlite3.Error as exc:
+        log.warning("DB insert failed for word %r: %s", word, exc)
+
+    log.info("Returning google result for %r: hiragana=%r meaning=%r", word, hiragana, meaning)
+    return LookupResponse(hiragana=hiragana, meaning=meaning, lookup_count=1)
 
 
 @app.get("/health")
