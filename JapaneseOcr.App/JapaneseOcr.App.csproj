@@ -61,4 +61,13 @@
              Condition="Exists('models\paddle')" />
   </ItemGroup>
 
+  <!-- MeCab dictionary files are extracted by the NuGet package but not declared as
+       publish content, so dotnet publish omits them. Reference them from the NuGet
+       package cache so they are always included in publish output. -->
+  <ItemGroup>
+    <Content Include="$(NuGetPackageRoot)mecab.dotnet\1.2.0\content\dic\**"
+             CopyToOutputDirectory="PreserveNewest"
+             Link="dic\%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
 </Project>

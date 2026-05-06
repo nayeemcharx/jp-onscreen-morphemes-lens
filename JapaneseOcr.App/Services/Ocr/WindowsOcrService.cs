@@ -91,7 +91,7 @@ public sealed class WindowsOcrService : IOcrService
                 : "Running OCR on {W}×{H} image (raw, no preprocessing)",
             bitmapForOcr.Width, bitmapForOcr.Height, ocrScale);
 
-        SaveDebugImage(bitmapForOcr);
+        // SaveDebugImage(bitmapForOcr);
 
         using var softwareBitmap = await ConvertToSoftwareBitmapAsync(bitmapForOcr);
         preprocessed?.Dispose();

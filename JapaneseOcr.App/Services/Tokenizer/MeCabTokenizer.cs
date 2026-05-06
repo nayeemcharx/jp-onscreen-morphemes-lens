@@ -69,6 +69,9 @@ public sealed class MeCabTokenizer : IJapaneseTokenizer, IDisposable
                 int end     = charIndex + surface.Length;
                 charIndex   = end;
 
+                if (!ContainsJapanese(surface))
+                    continue;
+
                 var features = node.Feature.Split(',');
 
                 var pos       = features.Length > 0 ? features[0] : string.Empty;
@@ -97,6 +100,17 @@ public sealed class MeCabTokenizer : IJapaneseTokenizer, IDisposable
         }
 
         return tokens;
+    }
+
+    private static bool ContainsJapanese(string s)
+    {
+        foreach (var c in s)
+            if (c is (>= '\u3041' and <= '\u309F')  // hiragana
+                   or (>= '\u30A0' and <= '\u30FF')  // katakana
+                   or (>= '\u4E00' and <= '\u9FFF')  // CJK unified ideographs (kanji)
+                   or (>= '\uF900' and <= '\uFAFF'))  // CJK compatibility ideographs
+                return true;
+        return false;
     }
 
     /// <summary>

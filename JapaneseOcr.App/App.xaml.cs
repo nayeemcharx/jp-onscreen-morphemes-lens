@@ -46,9 +46,7 @@ public partial class App : System.Windows.Application
     {
         base.OnStartup(e);
 
-#if DEBUG
-        // Attach a console window so Serilog's Console sink is visible when
-        // running with `dotnet run` or from a terminal in debug builds.
+        // Attach a console window so logs are visible and closing it kills the process.
         AllocConsole();
         // Switch both the Win32 console host and .NET streams to UTF-8 (code page 65001)
         // so Japanese characters (and other Unicode) render correctly.
@@ -56,7 +54,6 @@ public partial class App : System.Windows.Application
         SetConsoleCP(65001);
         Console.OutputEncoding = System.Text.Encoding.UTF8;
         Console.InputEncoding  = System.Text.Encoding.UTF8;
-#endif
 
         // ── 1. Logging ────────────────────────────────────────────────────────
         var logDir  = Path.Combine(
