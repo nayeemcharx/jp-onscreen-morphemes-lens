@@ -66,7 +66,7 @@ public sealed class WindowsOcrService : IOcrService
             || _settings.OcrContrast  != 1.0f
             || _settings.OcrSharpening;
 
-        if (needsPreprocess && ocrScale < _settings.OcrScale)
+        if (needsPreprocess)
             _logger.LogInformation(
                 "OcrScale clamped {R:F2}→{E:F2} to stay within {M}px limit " +
                 "(source {W}×{H})",
@@ -150,6 +150,7 @@ public sealed class WindowsOcrService : IOcrService
                     BoundingBox = ToPixelRect(word.BoundingRect),
                     Confidence  = 1.0,
                 });
+                // _logger.LogDebug("  Word: '{T}' → Box: {B}", word.Text, word.BoundingRect);
             }
 
             // Derive line bounding box as the union of all word boxes
@@ -158,7 +159,7 @@ public sealed class WindowsOcrService : IOcrService
                 : ToPixelRect(rawLine.Words.Count > 0
                     ? rawLine.Words[0].BoundingRect
                     : new Windows.Foundation.Rect());
-
+            
             var normalized = TextNormalizer.Normalize(rawLine.Text);
 
             // Windows.Media.Ocr inserts ASCII spaces between its internal "word"
@@ -169,7 +170,7 @@ public sealed class WindowsOcrService : IOcrService
             // Stripping them here makes line.Text and the Characters list
             // perfectly aligned: sum(ch.Text.Length for ch in Characters) == line.Text.Length.
             var lineText = normalized.Replace(" ", "");
-            _logger.LogDebug("Raw line text: '{T}' → Normalized line text: '{N}'", rawLine.Text, lineText);
+            _logger.LogDebug("Raw line text: '{T}' → Normalized line text: '{N}' and bounding box: {B}", rawLine.Text, lineText, lineBox);
             // Estimate character boxes when Windows OCR gives only word-level
             // (this is the fallback if 'characters' is empty)
             if (characters.Count == 0)

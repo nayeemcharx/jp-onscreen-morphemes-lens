@@ -142,7 +142,10 @@ public partial class App : System.Windows.Application
         services.AddSingleton<AppSettings>(sp =>
             sp.GetRequiredService<SettingsService>().Load());
 
-        // Screen capture
+        // Screen capture — synchronous GDI BitBlt. Deterministic and works reliably
+        // for all window types. WgcScreenCaptureService is available as an alternative
+        // but requires a persistent session to avoid cold-start frame timing issues
+        // with exclusive-fullscreen games.
         services.AddSingleton<IScreenCaptureService, WindowsScreenCaptureService>();
 
         // OCR (Windows.Media.Ocr)
