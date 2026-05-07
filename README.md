@@ -2,7 +2,7 @@
 
 A lightweight Windows desktop app that captures your screen on demand, detects Japanese text, and renders a transparent clickable overlay. Click any word to see its reading and translation.
 
-https://github.com/user-attachments/assets/27a8cbf5-c65a-4263-96d5-5f38e374b11d
+https://github.com/user-attachments/assets/d11930af-985f-4210-ad83-312408052054
 
 ---
 
