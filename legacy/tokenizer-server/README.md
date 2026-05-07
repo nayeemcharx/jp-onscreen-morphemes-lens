@@ -1,4 +1,4 @@
-# Japanese Tokenizer Server
+﻿# Japanese Tokenizer Server
 
 FastAPI server that exposes a `/tokenize` endpoint backed by **SudachiPy** (split-mode C).
 
@@ -85,8 +85,8 @@ Change `SplitMode.C` to `SplitMode.B` in `main.py` if the overlay boxes are too 
 
 ## C# integration
 
-The `SudachiHttpTokenizer` service in `JapaneseOcr.App/Services/` calls this server.
-Configure the URL in `%AppData%\JapaneseOcr\settings.json`:
+The `SudachiHttpTokenizer` service in `JPLens.App/Services/` calls this server.
+Configure the URL in `%AppData%\JPLens\settings.json`:
 
 ```json
 {
