@@ -73,6 +73,7 @@ public sealed partial class OverlayWindow : Window, IOverlayWindow
     private readonly AppSettings                    _settings;
     private IReadOnlyList<WordOverlay>              _overlays   = [];
     private WordOverlay?                            _hovered;
+    private readonly HashSet<WordOverlay>           _selected   = [];
 
     // Monitor origin for coordinate translation (physical pixels)
     private int    _monitorX;
@@ -106,6 +107,12 @@ public sealed partial class OverlayWindow : Window, IOverlayWindow
         Color.FromArgb(50, 255, 255, 255), thickness: 1.0);
     private static readonly Pen HovInner = CreateFrozenPen(
         Color.FromArgb(90, 255, 255, 255), thickness: 1.0);
+
+    // Selected state — amber/gold tint
+    private static readonly Pen SelStroke = CreateFrozenPen(
+        Color.FromArgb(230, 255, 200, 60), thickness: 1.5);
+    private static readonly Pen SelInner = CreateFrozenPen(
+        Color.FromArgb(80, 255, 240, 120), thickness: 1.0);
 
     // ──────────────────────────────────────────────────────────────────────────
 
@@ -172,6 +179,7 @@ public sealed partial class OverlayWindow : Window, IOverlayWindow
     {
         _overlays = overlays;
         _hovered  = null;
+        _selected.Clear();
 
         PositionWindowOnPrimaryMonitor();
 
@@ -204,6 +212,7 @@ public sealed partial class OverlayWindow : Window, IOverlayWindow
         Visibility = Visibility.Hidden;
         _overlays  = [];
         _hovered   = null;
+        _selected.Clear();
         _popupTimer.Stop();
         _popupBorder.Visibility = Visibility.Collapsed;
     }
@@ -225,37 +234,48 @@ public sealed partial class OverlayWindow : Window, IOverlayWindow
 
         foreach (var ov in _overlays)
         {
-            var r          = ToCanvasRect(ov.ScreenBoundingBox);
-            bool isHovered = ReferenceEquals(ov, _hovered);
+            var r           = ToCanvasRect(ov.ScreenBoundingBox);
+            bool isHovered  = ReferenceEquals(ov, _hovered);
+            bool isSelected = _selected.Contains(ov);
 
             // ── 1. Base fill — frosted-glass body ─────────────────────────────
-            // Top-to-bottom: white-tinted blue fading to a deeper translucent blue.
+            Color fillTop, fillBot;
+            if (isSelected)
+            {
+                fillTop = Color.FromArgb(110, 255, 210,  50);
+                fillBot = Color.FromArgb( 60, 200, 140,  20);
+            }
+            else if (isHovered)
+            {
+                fillTop = Color.FromArgb(100, 200, 225, 255);
+                fillBot = Color.FromArgb( 70,  90, 150, 230);
+            }
+            else
+            {
+                fillTop = Color.FromArgb( 55, 160, 200, 245);
+                fillBot = Color.FromArgb( 30,  60, 100, 200);
+            }
+
             var bodyFill = new LinearGradientBrush(
                 new GradientStopCollection
                 {
-                    new GradientStop(isHovered
-                        ? Color.FromArgb(100, 200, 225, 255)   // hover — ice white-blue
-                        : Color.FromArgb( 55, 160, 200, 245),  // idle  — soft blue
-                        0.0),
-                    new GradientStop(isHovered
-                        ? Color.FromArgb( 70,  90, 150, 230)   // hover bottom
-                        : Color.FromArgb( 30,  60, 100, 200),  // idle bottom
-                        1.0),
+                    new GradientStop(fillTop, 0.0),
+                    new GradientStop(fillBot, 1.0),
                 },
                 startPoint: new Point(0, 0), endPoint: new Point(0, 1));
 
             dc.DrawRoundedRectangle(bodyFill, null, r, rx, ry);
 
             // ── 2. Specular highlight — top ~48 % of box ────────────────────
-            // A bright white gradient from opaque at the top edge to fully
-            // transparent at mid-height, simulating a light source above.
             double specH = Math.Max(3.0, r.Height * 0.48);
             var specRect = new Rect(r.X + 2, r.Y + 1, Math.Max(0, r.Width - 4), specH);
+            byte specAlpha1 = isSelected ? (byte)100 : isHovered ? (byte)130 : (byte)80;
+            byte specAlpha2 = isSelected ? (byte) 25 : isHovered ? (byte) 30  : (byte)15;
             var specFill = new LinearGradientBrush(
                 new GradientStopCollection
                 {
-                    new GradientStop(Color.FromArgb(isHovered ? (byte)130 : (byte)80, 255, 255, 255), 0.0),
-                    new GradientStop(Color.FromArgb(isHovered ? (byte) 30 : (byte)15, 255, 255, 255), 0.55),
+                    new GradientStop(Color.FromArgb(specAlpha1, 255, 255, 255), 0.0),
+                    new GradientStop(Color.FromArgb(specAlpha2, 255, 255, 255), 0.55),
                     new GradientStop(Color.FromArgb(0, 255, 255, 255), 1.0),
                 },
                 startPoint: new Point(0, 0), endPoint: new Point(0, 1));
@@ -265,22 +285,24 @@ public sealed partial class OverlayWindow : Window, IOverlayWindow
             // ── 3. Bottom rim light — faint glow along the lower edge ────────
             double rimH = Math.Max(2.0, r.Height * 0.22);
             var rimRect = new Rect(r.X + 3, r.Bottom - rimH - 1, Math.Max(0, r.Width - 6), rimH);
+            Color rimColor = isSelected ? Color.FromArgb(50, 255, 200, 60) : Color.FromArgb(isHovered ? (byte)55 : (byte)28, 180, 220, 255);
             var rimFill = new LinearGradientBrush(
                 new GradientStopCollection
                 {
-                    new GradientStop(Color.FromArgb(0, 180, 220, 255), 0.0),
-                    new GradientStop(Color.FromArgb(isHovered ? (byte)55 : (byte)28, 180, 220, 255), 1.0),
+                    new GradientStop(Color.FromArgb(0, rimColor.R, rimColor.G, rimColor.B), 0.0),
+                    new GradientStop(rimColor, 1.0),
                 },
                 startPoint: new Point(0, 0), endPoint: new Point(0, 1));
 
             dc.DrawRoundedRectangle(rimFill, null, rimRect, rx - 2, ry - 2);
 
             // ── 4. Outer border + inner glow ring ──────────────────────────
-            dc.DrawRoundedRectangle(null, isHovered ? HovStroke : BoxStroke, r, rx, ry);
+            Pen outerPen = isSelected ? SelStroke : isHovered ? HovStroke : BoxStroke;
+            Pen innerPen = isSelected ? SelInner  : isHovered ? HovInner  : BoxInner;
+            dc.DrawRoundedRectangle(null, outerPen, r, rx, ry);
 
-            // Inset inner-glow ring (1 px inside the outer border)
             var inner = new Rect(r.X + 1.5, r.Y + 1.5, r.Width - 3, r.Height - 3);
-            dc.DrawRoundedRectangle(null, isHovered ? HovInner : BoxInner, inner, rx - 1, ry - 1);
+            dc.DrawRoundedRectangle(null, innerPen, inner, rx - 1, ry - 1);
         }
     }
 
@@ -302,18 +324,43 @@ public sealed partial class OverlayWindow : Window, IOverlayWindow
 
     private void Canvas_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        var pos      = e.GetPosition(OverlayCanvas);
-        var selected = FindOverlayAtCanvasPoint(pos.X, pos.Y);
+        var pos = e.GetPosition(OverlayCanvas);
+        var hit = FindOverlayAtCanvasPoint(pos.X, pos.Y);
 
-        if (selected is not null)
+        if (hit is not null && (Keyboard.Modifiers & ModifierKeys.Control) != 0)
         {
-            // Cancel any previous in-flight lookup and start a new one
+            // Ctrl+Click — toggle selection
+            if (!_selected.Remove(hit))
+                _selected.Add(hit);
+
+            InvalidateVisual();
+            e.Handled = true;
+            return;
+        }
+
+        if (hit is not null)
+        {
+            // Plain click — translate selected set (or just the clicked box)
+            string textToLookup;
+            WordOverlay representativeOverlay;
+
+            if (_selected.Count > 0)
+            {
+                textToLookup        = BuildCombinedText(_selected);
+                representativeOverlay = hit;
+            }
+            else
+            {
+                textToLookup        = hit.SurfaceText;
+                representativeOverlay = hit;
+            }
+
             var prev = System.Threading.Interlocked.Exchange(ref _lookupCts, new CancellationTokenSource());
             prev?.Cancel();
             prev?.Dispose();
 
-            ShowLoadingPopup(selected, pos);
-            _ = DoLookupAsync(selected, pos, _lookupCts!.Token);
+            ShowLoadingPopupForText(textToLookup, representativeOverlay, pos);
+            _ = DoLookupForTextAsync(textToLookup, representativeOverlay, pos, _lookupCts!.Token);
             e.Handled = true;
         }
         else
@@ -322,11 +369,45 @@ public sealed partial class OverlayWindow : Window, IOverlayWindow
         }
     }
 
+    /// <summary>
+    /// Reconstructs the combined source text spanning all selected overlays.
+    /// For overlays on the same line, extracts the substring from the earliest
+    /// StartCharIndex to the latest EndCharIndex, which naturally includes any
+    /// particles/prepositions between them.
+    /// For overlays on different lines, concatenates their surface texts.
+    /// </summary>
+    private static string BuildCombinedText(IEnumerable<WordOverlay> overlays)
+    {
+        // Group by source line
+        var byLine = overlays
+            .GroupBy(o => o.SourceLineText)
+            .OrderBy(g => g.Min(o => o.StartCharIndex))
+            .ToList();
+
+        var parts = new System.Text.StringBuilder();
+        foreach (var group in byLine)
+        {
+            int start = group.Min(o => o.StartCharIndex);
+            int end   = group.Max(o => o.EndCharIndex);
+            string lineText = group.Key;
+
+            if (start >= 0 && end > start && end <= lineText.Length)
+                parts.Append(lineText, start, end - start);
+            else
+                parts.Append(string.Join(string.Empty, group.Select(o => o.SurfaceText)));
+        }
+
+        return parts.ToString();
+    }
+
     // ── Lookup popup helpers ──────────────────────────────────────────────────
 
     private void ShowLoadingPopup(WordOverlay overlay, Point canvasPos)
+        => ShowLoadingPopupForText(overlay.SurfaceText, overlay, canvasPos);
+
+    private void ShowLoadingPopupForText(string text, WordOverlay overlay, Point canvasPos)
     {
-        _popupReading.Text      = overlay.SurfaceText;
+        _popupReading.Text      = text;
         _popupMeaning.Text      = "…";
         _popupBorder.Visibility = Visibility.Visible;
         PositionPopup(canvasPos);
@@ -335,24 +416,27 @@ public sealed partial class OverlayWindow : Window, IOverlayWindow
         _popupTimer.Start();
     }
 
-    private async Task DoLookupAsync(WordOverlay overlay, Point canvasPos, CancellationToken ct)
+    private Task DoLookupAsync(WordOverlay overlay, Point canvasPos, CancellationToken ct)
+        => DoLookupForTextAsync(overlay.SurfaceText, overlay, canvasPos, ct);
+
+    private async Task DoLookupForTextAsync(string text, WordOverlay overlay, Point canvasPos, CancellationToken ct)
     {
-        var result = await _lookup.LookupAsync(overlay.SurfaceText, ct);
+        var result = await _lookup.LookupAsync(text, ct);
 
         if (ct.IsCancellationRequested)
             return;
 
         if (result is not null)
         {
-            // Show "word [reading]" if the hiragana reading differs from the surface text.
-            // Reading comes from the MeCab tokenizer (WordOverlay.Reading); Google Translate
-            // no longer supplies a hiragana field.
-            bool hasDifferentReading = !string.IsNullOrWhiteSpace(overlay.Reading)
+            // For single-token lookups, show reading in brackets if available.
+            bool isSingleToken = text == overlay.SurfaceText;
+            bool hasDifferentReading = isSingleToken
+                                       && !string.IsNullOrWhiteSpace(overlay.Reading)
                                        && overlay.Reading != overlay.SurfaceText;
 
             _popupReading.Text = hasDifferentReading
-                ? $"{overlay.SurfaceText}  [{overlay.Reading}]"
-                : overlay.SurfaceText;
+                ? $"{text}  [{overlay.Reading}]"
+                : text;
 
             _popupMeaning.Text = result.Meaning;
         }
@@ -361,7 +445,6 @@ public sealed partial class OverlayWindow : Window, IOverlayWindow
             _popupMeaning.Text = "(lookup failed — is the LLM server running?)";
         }
 
-        // Re-start the auto-dismiss timer so it counts from when the result arrived
         _popupTimer.Stop();
         _popupTimer.Start();
     }

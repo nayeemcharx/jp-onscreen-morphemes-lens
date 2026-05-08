@@ -98,6 +98,8 @@ public sealed class TokenBoxMapper : ITokenBoxMapper
                 ScreenBoundingBox = paddedBox,
                 SourceLineText    = line.Text,
                 Confidence        = line.Confidence,
+                StartCharIndex    = token.StartCharIndex,
+                EndCharIndex      = token.EndCharIndex,
             });
         }
 
