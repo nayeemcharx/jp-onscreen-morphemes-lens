@@ -37,6 +37,15 @@ public partial class App : System.Windows.Application
     [System.Runtime.InteropServices.DllImport("kernel32.dll")]
     private static extern bool SetConsoleCP(uint wCodePageID);
 
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr GetStdHandle(int nStdHandle);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetConsoleMode(IntPtr hConsoleHandle, out uint lpMode);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool SetConsoleMode(IntPtr hConsoleHandle, uint dwMode);
+
     private ServiceProvider?     _services;
     private Win32HotkeyService?  _hotkeyService;
     private TrayIconService?     _trayService;
@@ -46,6 +55,10 @@ public partial class App : System.Windows.Application
     {
         base.OnStartup(e);
 
+        // Keep the app alive even when no WPF window has ever been shown
+        // (the overlay starts hidden; only the tray icon drives lifetime).
+        ShutdownMode = ShutdownMode.OnExplicitShutdown;
+
         // Attach a console window so logs are visible and closing it kills the process.
         AllocConsole();
         // Switch both the Win32 console host and .NET streams to UTF-8 (code page 65001)
@@ -54,6 +67,19 @@ public partial class App : System.Windows.Application
         SetConsoleCP(65001);
         Console.OutputEncoding = System.Text.Encoding.UTF8;
         Console.InputEncoding  = System.Text.Encoding.UTF8;
+
+        // Disable Quick Edit mode on the console.  By default, left-clicking in
+        // the console window enables a text-selection state that Windows implements
+        // by pausing ALL threads in the process — including WPF's message pump.
+        // While paused, WM_HOTKEY deliveries and Dispatcher.InvokeAsync callbacks
+        // accumulate silently and then all fire the instant the pause is released
+        // (e.g. by pressing Escape or Enter in the console).  That produces the
+        // symptom of "hotkey does nothing for a while, then everything fires at once".
+        const int  STD_INPUT_HANDLE  = -10;
+        const uint ENABLE_QUICK_EDIT = 0x0040u;
+        var conIn = GetStdHandle(STD_INPUT_HANDLE);
+        if (GetConsoleMode(conIn, out uint conMode))
+            SetConsoleMode(conIn, conMode & ~ENABLE_QUICK_EDIT);
 
         // ── 1. Logging ────────────────────────────────────────────────────────
         var logDir  = Path.Combine(
@@ -84,10 +110,12 @@ public partial class App : System.Windows.Application
         // from disk and the instance is shared across all dependents.
 
         // ── 4. Create helper window (must be on UI thread) ───────────────────
+        // EnsureHandle() creates the HWND without ever showing or activating the
+        // window.  The previous Show()+Hide() approach briefly made the helper
+        // window the foreground window, which desynchronised WPF's internal
+        // keyboard-focus state and caused Dispatcher.InvokeAsync hotkey callbacks
+        // to stop firing until some other Win32 event re-synced the state.
         _helperWindow = new HotkeyHelperWindow();
-        _helperWindow.Show();
-        _helperWindow.Hide();
-
         var helper = new WindowInteropHelper(_helperWindow);
         helper.EnsureHandle();
 

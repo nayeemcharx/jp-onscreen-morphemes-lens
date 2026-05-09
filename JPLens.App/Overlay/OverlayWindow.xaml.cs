@@ -60,6 +60,7 @@ public sealed partial class OverlayWindow : Window, IOverlayWindow
     private const int HTTRANSPARENT     = -1;
     private const int HTCLIENT          = 1;
     private const int WS_EX_TRANSPARENT = 0x00000020;
+    private const int WS_EX_NOACTIVATE  = 0x08000000;
     private const int GWL_EXSTYLE       = -20;
 
     [DllImport("user32.dll")]
@@ -208,13 +209,10 @@ public sealed partial class OverlayWindow : Window, IOverlayWindow
         PositionWindowOnPrimaryMonitor();
 
         // Do NOT call Activate() or Focus() here.
-        // The window is Topmost=true so it renders above everything without
-        // needing to become the foreground window.  Calling Activate() invokes
-        // SetForegroundWindow() which Windows restricts; when it fails silently
-        // it leaves WPF and Win32 focus state out of sync, which causes the
-        // hotkey Dispatcher.InvokeAsync callback to stop firing on subsequent
-        // hotkey presses.  ESC is handled by the global Win32 hotkey and does
-        // not require keyboard focus.
+        // The window carries WS_EX_NOACTIVATE (set in OnSourceInitialized) so
+        // it never steals keyboard focus — neither on Show() nor on click.
+        // This keeps the WPF Dispatcher in sync and ensures the global hotkey
+        // callback fires reliably on every press.
         Visibility = Visibility.Visible;
 
         // Invalidate the Window itself (not just the Canvas child) so that
@@ -771,6 +769,17 @@ public sealed partial class OverlayWindow : Window, IOverlayWindow
         var helper = new WindowInteropHelper(this);
         var source = HwndSource.FromHwnd(helper.Handle);
         source?.AddHook(WndProcHook);
+
+        // Prevent the overlay from stealing keyboard focus when the user clicks
+        // a word box (which returns HTCLIENT from WM_NCHITTEST).  Without
+        // WS_EX_NOACTIVATE, a click can activate the overlay and desync the
+        // WPF Dispatcher so that global hotkey callbacks queue up without
+        // executing — they then all fire at once when something (e.g. pressing
+        // a key) pumps the message loop.  With this style the window stays
+        // non-active regardless of clicks, fixing both the "stuck hotkey" and
+        // the spurious queued-callback flush.
+        int exStyle = GetWindowLong(helper.Handle, GWL_EXSTYLE);
+        SetWindowLong(helper.Handle, GWL_EXSTYLE, exStyle | WS_EX_NOACTIVATE);
     }
 
     private IntPtr WndProcHook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam,

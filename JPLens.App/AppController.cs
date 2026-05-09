@@ -102,7 +102,9 @@ public sealed class AppController
     {
         var cts = System.Threading.Interlocked.Exchange(ref _cts, null);
         cts?.Cancel();
-        cts?.Dispose();
+        // Do NOT dispose here — ToggleAsync's finally block owns the lifetime
+        // of the CTS and will dispose it after the awaited task unwinds.
+        // Disposing here would cause a double-dispose when the finally runs.
         _overlayWindow.HideOverlay();
         _logger.LogDebug("Overlay cleared by toggle-off");
     }
