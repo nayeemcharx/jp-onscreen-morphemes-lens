@@ -532,24 +532,36 @@ public sealed partial class OverlayWindow : Window, IOverlayWindow
 
             if (_selected.Count > 0 && merged.Contains(hit))
             {
-                // The clicked word is inside the current merged region.
-                // Trim the explicit selection to [first..hit] in reading order,
-                // dropping everything that comes strictly after the clicked word.
                 var lineRank = GetLinesInReadingOrder(_overlays)
                     .Select((l, i) => (l.Key, i))
                     .ToDictionary(t => t.Key, t => t.i);
 
                 int hitLine = lineRank.GetValueOrDefault(hit.SourceLineText, 0);
 
-                _selected.RemoveWhere(ov =>
+                // Check if hit is the anchor (no explicitly-selected word comes before it)
+                bool isAnchor = !_selected.Any(ov =>
                 {
                     int ovLine = lineRank.GetValueOrDefault(ov.SourceLineText, 0);
-                    if (ovLine != hitLine) return ovLine > hitLine;
-                    return ov.StartCharIndex > hit.StartCharIndex;
+                    if (ovLine != hitLine) return ovLine < hitLine;
+                    return ov.StartCharIndex < hit.StartCharIndex;
                 });
 
-                // Make the clicked word itself explicitly selected
-                _selected.Add(hit);
+                if (isAnchor)
+                {
+                    // Clicking the anchor clears the whole selection
+                    _selected.Clear();
+                }
+                else
+                {
+                    // Trim: keep only [anchor..hit], drop everything after hit
+                    _selected.RemoveWhere(ov =>
+                    {
+                        int ovLine = lineRank.GetValueOrDefault(ov.SourceLineText, 0);
+                        if (ovLine != hitLine) return ovLine > hitLine;
+                        return ov.StartCharIndex > hit.StartCharIndex;
+                    });
+                    _selected.Add(hit);
+                }
             }
             else
             {
