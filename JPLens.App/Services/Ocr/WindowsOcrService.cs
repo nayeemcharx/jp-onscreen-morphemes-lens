@@ -74,42 +74,67 @@ public sealed class WindowsOcrService : IOcrService
                 _settings.OcrScale, ocrScale, ImagePreprocessor.MaxOcrDimension,
                 frame.Image.Width, frame.Image.Height);
 
-        System.Drawing.Bitmap? preprocessed = needsPreprocess
-            ? ImagePreprocessor.Preprocess(
-                frame.Image,
-                ocrScale,
-                contrastFactor: _settings.OcrContrast,
-                sharpen:        _settings.OcrSharpening,
-                grayscale:      _settings.OcrGrayscale)
-            : null;
+        // Split the captured frame into 6 overlapping slices and run OCR on each.
+        // Using sub-images gives the OCR engine more local context and a larger
+        // relative text size, improving recognition for small or edge text.
+        // All slices use the same ocrScale (computed from the full frame) so that
+        // every bounding box lives in the same coordinate space after the offset
+        // correction below.  Duplicates produced by the overlap are eliminated by
+        // OverlayPostProcessor.RemoveDuplicates after tokenisation.
+        var slices   = GetSlices(frame.Image.Width, frame.Image.Height);
+        _logger.LogInformation("Running OCR on {N} slices (preprocessed={P})",
+            slices.Count, needsPreprocess);
+        var allLines = new List<OcrLine>();
 
-        var bitmapForOcr = preprocessed ?? frame.Image;
+        for (int si = 0; si < slices.Count; si++)
+        {
+            ct.ThrowIfCancellationRequested();
 
-        _logger.LogDebug(
-            needsPreprocess
-                ? "Running OCR on {W}×{H} image (scale={S})"
-                : "Running OCR on {W}×{H} image (raw, no preprocessing)",
-            bitmapForOcr.Width, bitmapForOcr.Height, ocrScale);
+            var (sliceX, sliceY, sliceW, sliceH) = slices[si];
 
-        // SaveDebugImage(bitmapForOcr);
+            using var subBitmap = CropBitmap(frame.Image, sliceX, sliceY, sliceW, sliceH);
 
-        using var softwareBitmap = await ConvertToSoftwareBitmapAsync(bitmapForOcr);
-        preprocessed?.Dispose();
+            System.Drawing.Bitmap? preprocessed = needsPreprocess
+                ? ImagePreprocessor.Preprocess(
+                    subBitmap,
+                    ocrScale,
+                    contrastFactor: _settings.OcrContrast,
+                    sharpen:        _settings.OcrSharpening,
+                    grayscale:      _settings.OcrGrayscale)
+                : null;
 
-        ct.ThrowIfCancellationRequested();
+            var bitmapForOcr = preprocessed ?? subBitmap;
 
+            _logger.LogDebug(
+                "Slice {I}/{N} ({X},{Y}) {SW}×{SH} → OCR image {OW}×{OH}",
+                si + 1, slices.Count, sliceX, sliceY, sliceW, sliceH,
+                bitmapForOcr.Width, bitmapForOcr.Height);
 
+            using var softwareBitmap = await ConvertToSoftwareBitmapAsync(bitmapForOcr);
+            preprocessed?.Dispose();
 
-        // Run OCR (WinRT async)
-        var rawResult = await _engine.RecognizeAsync(softwareBitmap);
+            ct.ThrowIfCancellationRequested();
 
-        var lines = BuildLines(rawResult, ocrScale);
+            var rawResult = await _engine.RecognizeAsync(softwareBitmap);
+            var lines     = BuildLines(rawResult, ocrScale);
 
-        _logger.LogInformation("OCR returned {Count} lines", lines.Count);
+            // Shift bounding boxes from sub-image OCR space → full-image OCR space.
+            // The OCR engine returns coordinates in the preprocessed image space
+            // (original × ocrScale). Adding (sliceX × ocrScale, sliceY × ocrScale)
+            // maps them back to the equivalent position in the full-frame OCR image.
+            if (sliceX != 0 || sliceY != 0)
+                lines = ApplyOffset(lines, sliceX * ocrScale, sliceY * ocrScale);
+
+            allLines.AddRange(lines);
+        }
+
+        _logger.LogInformation(
+            "OCR returned {Count} lines total across {S} slices",
+            allLines.Count, slices.Count);
 
         return new OcrResult
         {
-            Lines    = lines,
+            Lines    = allLines,
             OcrScale = ocrScale,
         };
     }
@@ -117,6 +142,81 @@ public sealed class WindowsOcrService : IOcrService
     // ──────────────────────────────────────────────────────────────────────────
     // Private helpers
     // ──────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Returns the 6 slice rectangles used for multi-pass OCR.
+    /// Order: full image, 3 horizontal thirds (top/mid/bottom), 2 vertical halves (left/right).
+    /// </summary>
+    private static List<(int X, int Y, int W, int H)> GetSlices(int width, int height)
+    {
+        int h3 = height / 3;
+        int h4 = height / 4;
+        int w3 = width  / 3;
+        int w4 = width  / 4;
+
+        return
+        [
+            // Horizontal thirds (full width, 1/3 height each)
+            (0,      0,       width,  h3             ),
+            (0,      h3,      width,  h3             ),
+            (0,      h3 * 2,  width,  height - h3*2  ),
+
+            // Horizontal quarters (full width, 1/4 height each)
+            (0,      0,       width,  h4             ),
+            (0,      h4,      width,  h4             ),
+            (0,      h4 * 2,  width,  h4             ),
+            (0,      h4 * 3,  width,  height - h4*3  ),
+
+            //// Vertical thirds (1/3 width, full height each)
+            //(0,      0,       w3,             height         ),
+            //(w3,     0,       w3,             height         ),
+            //(w3 * 2, 0,       width - w3 * 2, height         ),
+
+            //// Vertical quarters (1/4 width, full height each)
+            //(0,      0,       w4,             height         ),
+            //(w4,     0,       w4,             height         ),
+            //(w4 * 2, 0,       w4,             height         ),
+            //(w4 * 3, 0,       width - w4 * 3, height         ),
+        ];
+    }
+
+    /// <summary>Creates a cropped copy of <paramref name="source"/>.</summary>
+    private static System.Drawing.Bitmap CropBitmap(
+        System.Drawing.Bitmap source, int x, int y, int w, int h)
+        => source.Clone(
+            new System.Drawing.Rectangle(x, y, w, h),
+            source.PixelFormat);
+
+    /// <summary>
+    /// Returns a new list of lines with every bounding box shifted by
+    /// (<paramref name="dx"/>, <paramref name="dy"/>) in OCR-image pixel space.
+    /// </summary>
+    private static List<OcrLine> ApplyOffset(List<OcrLine> lines, double dx, double dy)
+    {
+        var result = new List<OcrLine>(lines.Count);
+        foreach (var line in lines)
+        {
+            result.Add(new OcrLine
+            {
+                Text        = line.Text,
+                BoundingBox = OffsetRect(line.BoundingBox, dx, dy),
+                Confidence  = line.Confidence,
+                Orientation = line.Orientation,
+                Characters  = line.Characters
+                    .Select(c => new OcrCharacter
+                    {
+                        Text        = c.Text,
+                        BoundingBox = OffsetRect(c.BoundingBox, dx, dy),
+                        Confidence  = c.Confidence,
+                    })
+                    .ToList(),
+            });
+        }
+        return result;
+    }
+
+    private static PixelRect OffsetRect(PixelRect r, double dx, double dy)
+        => new(r.X + dx, r.Y + dy, r.Width, r.Height);
 
     private void SaveDebugImage(System.Drawing.Bitmap bitmap)
     {

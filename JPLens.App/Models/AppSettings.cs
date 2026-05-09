@@ -22,7 +22,7 @@ public sealed class AppSettings
     /// 1.0 = raw passthrough (recommended — identical to Win+Shift+T behaviour).
     /// The engine clamps automatically so that neither dimension exceeds 4096 px.
     /// </summary>
-    public double OcrScale { get; set; } = 1.0;
+    public double OcrScale { get; set; } = 1.4;
 
     /// <summary>
     /// Contrast multiplier applied before OCR.  1.0 = no change (recommended).
@@ -38,7 +38,7 @@ public sealed class AppSettings
     /// creates ringing around fine Japanese strokes which hurts recognition.
     /// Enable only for blurry/screenshot sources.
     /// </summary>
-    public bool OcrSharpening { get; set; } = false;
+    public bool OcrSharpening { get; set; } = true;
 
     /// <summary>
     /// When true (default), the captured frame is converted to grayscale using

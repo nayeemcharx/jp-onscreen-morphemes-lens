@@ -55,6 +55,27 @@ public static class GeometryHelper
         return unionArea <= 0 ? 0.0 : interArea / unionArea;
     }
 
+    /// <summary>
+    /// Returns the fraction of the smaller rectangle's area that is covered by
+    /// the intersection.  Range [0, 1].  Use this to detect when one box is
+    /// substantially contained inside another regardless of the larger box's size.
+    /// </summary>
+    public static double MinContainment(PixelRect a, PixelRect b)
+    {
+        double interX1 = Math.Max(a.X,      b.X);
+        double interY1 = Math.Max(a.Y,      b.Y);
+        double interX2 = Math.Min(a.Right,  b.Right);
+        double interY2 = Math.Min(a.Bottom, b.Bottom);
+
+        if (interX2 <= interX1 || interY2 <= interY1)
+            return 0.0;
+
+        double interArea = (interX2 - interX1) * (interY2 - interY1);
+        double minArea   = Math.Min(a.Area, b.Area);
+
+        return minArea <= 0 ? 0.0 : interArea / minArea;
+    }
+
     /// <summary>Scales a rectangle by <paramref name="factor"/> around origin (0,0).</summary>
     public static PixelRect Scale(PixelRect rect, double factor)
         => new(rect.X * factor, rect.Y * factor, rect.Width * factor, rect.Height * factor);

@@ -106,12 +106,39 @@ public sealed class PaddleOcrService : IOcrService, IDisposable
     {
         ct.ThrowIfCancellationRequested();
 
-        // Run the CPU-bound pipeline on a thread-pool thread to keep the UI
-        // thread responsive.
-        var lines = await Task.Run(() => RunPipeline(frame.Image, ct), ct);
+        // Split the frame into sub-images and run the full PaddleOCR pipeline on
+        // each slice independently.  Smaller images give the detection model more
+        // focused context and avoid the crowding effect on dense text screens.
+        // Since OcrScale is always 1.0 for PaddleOCR (no pre-scaling), the offset
+        // applied after each slice is simply (sliceX, sliceY) in screen pixels.
+        var slices   = GetSlices(frame.Image.Width, frame.Image.Height);
+        var allLines = new List<OcrLine>();
 
-        _logger.LogInformation("PaddleOCR returned {Count} lines", lines.Count);
-        return new OcrResult { Lines = lines, OcrScale = 1.0 };
+        for (int si = 0; si < slices.Count; si++)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var (sliceX, sliceY, sliceW, sliceH) = slices[si];
+
+            using var subBitmap = CropBitmap(frame.Image, sliceX, sliceY, sliceW, sliceH);
+
+            _logger.LogDebug(
+                "Slice {I}/{N} ({X},{Y}) {SW}\u00d7{SH}",
+                si + 1, slices.Count, sliceX, sliceY, sliceW, sliceH);
+
+            var lines = await Task.Run(() => RunPipeline(subBitmap, ct), ct);
+
+            if (sliceX != 0 || sliceY != 0)
+                lines = ApplyOffset(lines, sliceX, sliceY);
+
+            allLines.AddRange(lines);
+        }
+
+        _logger.LogInformation(
+            "PaddleOCR returned {Count} lines total across {S} slices",
+            allLines.Count, slices.Count);
+
+        return new OcrResult { Lines = allLines, OcrScale = 1.0 };
     }
 
     public void Dispose()
@@ -650,6 +677,72 @@ public sealed class PaddleOcrService : IOcrService, IDisposable
         _logger.LogDebug("Loading PaddleOCR {Label} model from {Path}", label, path);
         return new InferenceSession(path, opts);
     }
+
+    private static List<(int X, int Y, int W, int H)> GetSlices(int width, int height)
+    {
+        int h3 = height / 3;
+        int h4 = height / 4;
+        int w3 = width  / 3;
+        int w4 = width  / 4;
+
+        return
+        [
+            // Horizontal thirds (full width, 1/3 height each)
+            (0,      0,       width,  h3            ),
+            (0,      h3,      width,  h3            ),
+            (0,      h3 * 2,  width,  height - h3*2 ),
+
+            // Horizontal quarters (full width, 1/4 height each)
+            (0,      0,       width,  h4            ),
+            (0,      h4,      width,  h4            ),
+            (0,      h4 * 2,  width,  h4            ),
+            (0,      h4 * 3,  width,  height - h4*3 ),
+
+            //// Vertical thirds (1/3 width, full height each)
+            //(0,      0,       w3,             height         ),
+            //(w3,     0,       w3,             height         ),
+            //(w3 * 2, 0,       width - w3 * 2, height         ),
+
+            //// Vertical quarters (1/4 width, full height each)
+            //(0,      0,       w4,             height         ),
+            //(w4,     0,       w4,             height         ),
+            //(w4 * 2, 0,       w4,             height         ),
+            //(w4 * 3, 0,       width - w4 * 3, height         ),
+        ];
+    }
+
+    private static System.Drawing.Bitmap CropBitmap(
+        System.Drawing.Bitmap source, int x, int y, int w, int h)
+        => source.Clone(
+            new System.Drawing.Rectangle(x, y, w, h),
+            source.PixelFormat);
+
+    private static List<OcrLine> ApplyOffset(List<OcrLine> lines, double dx, double dy)
+    {
+        var result = new List<OcrLine>(lines.Count);
+        foreach (var line in lines)
+        {
+            result.Add(new OcrLine
+            {
+                Text        = line.Text,
+                BoundingBox = OffsetRect(line.BoundingBox, dx, dy),
+                Confidence  = line.Confidence,
+                Orientation = line.Orientation,
+                Characters  = line.Characters
+                    .Select(c => new OcrCharacter
+                    {
+                        Text        = c.Text,
+                        BoundingBox = OffsetRect(c.BoundingBox, dx, dy),
+                        Confidence  = c.Confidence,
+                    })
+                    .ToList(),
+            });
+        }
+        return result;
+    }
+
+    private static PixelRect OffsetRect(PixelRect r, double dx, double dy)
+        => new(r.X + dx, r.Y + dy, r.Width, r.Height);
 
     private static string[] LoadDict(string path)
     {
