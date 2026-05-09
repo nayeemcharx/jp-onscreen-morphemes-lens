@@ -171,7 +171,8 @@ public partial class App : System.Windows.Application
         // Overlay window — must be created on UI thread; registered as singleton
         services.AddSingleton<OverlayWindow>(sp => new OverlayWindow(
             sp.GetRequiredService<ILookupService>(),
-            sp.GetRequiredService<AppSettings>()));
+            sp.GetRequiredService<AppSettings>(),
+            sp.GetRequiredService<IClipboardService>()));
         services.AddSingleton<IOverlayWindow>(sp =>
             sp.GetRequiredService<OverlayWindow>());
 

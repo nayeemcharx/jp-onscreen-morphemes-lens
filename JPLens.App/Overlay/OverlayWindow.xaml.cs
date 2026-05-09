@@ -19,6 +19,7 @@ using SolidColorBrush    = System.Windows.Media.SolidColorBrush;
 using LinearGradientBrush = System.Windows.Media.LinearGradientBrush;
 using GradientStop       = System.Windows.Media.GradientStop;
 using GradientStopCollection = System.Windows.Media.GradientStopCollection;
+using System.Windows.Media.Animation;
 using JPLens.Interfaces;
 using JPLens.Models;
 using JPLens.Services;
@@ -71,6 +72,7 @@ public sealed partial class OverlayWindow : Window, IOverlayWindow
 
     private readonly ILookupService               _lookup;
     private readonly AppSettings                    _settings;
+    private readonly IClipboardService              _clipboard;
     private IReadOnlyList<WordOverlay>              _overlays   = [];
     private WordOverlay?                            _hovered;
     private readonly HashSet<WordOverlay>           _selected   = [];
@@ -116,10 +118,11 @@ public sealed partial class OverlayWindow : Window, IOverlayWindow
 
     // ──────────────────────────────────────────────────────────────────────────
 
-    public OverlayWindow(ILookupService lookup, AppSettings settings)
+    public OverlayWindow(ILookupService lookup, AppSettings settings, IClipboardService clipboard)
     {
-        _lookup   = lookup;
-        _settings = settings;
+        _lookup    = lookup;
+        _settings  = settings;
+        _clipboard = clipboard;
 
         InitializeComponent();
 
@@ -128,43 +131,64 @@ public sealed partial class OverlayWindow : Window, IOverlayWindow
         // Positioned dynamically via Canvas.SetLeft/Top.
         _popupReading = new TextBlock
         {
-            Foreground  = Brushes.White,
-            FontSize    = 18,
-            FontFamily  = new FontFamily("Meiryo, MS Gothic, Segoe UI"),
-            FontWeight  = FontWeights.Bold,
+            Foreground        = Brushes.White,
+            FontSize          = 18,
+            FontFamily        = new FontFamily("Meiryo, MS Gothic, Segoe UI"),
+            FontWeight        = FontWeights.Bold,
+            TextWrapping      = TextWrapping.Wrap,
+            VerticalAlignment = VerticalAlignment.Center,
         };
 
         _popupMeaning = new TextBlock
         {
-            Foreground   = new SolidColorBrush(Color.FromArgb(220, 180, 220, 255)),
-            FontSize     = 12,
-            FontFamily   = new FontFamily("Segoe UI, Arial"),
-            TextWrapping = TextWrapping.Wrap,
-            MaxWidth     = 300,
-            Margin       = new Thickness(0, 4, 0, 0),
+            Foreground        = new SolidColorBrush(Color.FromArgb(220, 180, 220, 255)),
+            FontSize          = 14,
+            FontFamily        = new FontFamily("Segoe UI, Arial"),
+            TextWrapping      = TextWrapping.Wrap,
+            VerticalAlignment = VerticalAlignment.Center,
         };
 
-        var stack = new StackPanel { Margin = new Thickness(10, 8, 10, 8) };
-        stack.Children.Add(_popupReading);
-        stack.Children.Add(_popupMeaning);
+        // ── Close button (top-right title bar) ────────────────────────────────
+        Border popupBorderRef = null!; // assigned just below; lambda safe to capture
+        var closeBtn = MakeIconButton("\uE8BB", () => popupBorderRef.Visibility = Visibility.Collapsed);
+        var titleRow = new DockPanel { Margin = new Thickness(0, 0, 0, 2) };
+        titleRow.HorizontalAlignment = System.Windows.HorizontalAlignment.Right;
+        titleRow.Children.Add(closeBtn);
+
+        // ── Reading row: text + copy icon ─────────────────────────────────────
+        var readingCopyBtn = MakeCopyButton(() => _clipboard.CopyText(_popupReading.Text));
+        var readingRow = new DockPanel { Margin = new Thickness(0, 0, 0, 4) };
+        DockPanel.SetDock(readingCopyBtn, Dock.Right);
+        readingRow.Children.Add(readingCopyBtn);
+        readingRow.Children.Add(_popupReading);
+
+        // ── Meaning row: text + copy icon ─────────────────────────────────────
+        var meaningCopyBtn = MakeCopyButton(() => _clipboard.CopyText(_popupMeaning.Text));
+        var meaningRow = new DockPanel();
+        DockPanel.SetDock(meaningCopyBtn, Dock.Right);
+        meaningRow.Children.Add(meaningCopyBtn);
+        meaningRow.Children.Add(_popupMeaning);
+
+        var content = new StackPanel { Margin = new Thickness(10, 6, 6, 10) };
+        content.Children.Add(titleRow);
+        content.Children.Add(readingRow);
+        content.Children.Add(meaningRow);
 
         _popupBorder = new Border
         {
-            Background   = new SolidColorBrush(Color.FromArgb(235, 20, 20, 30)),
-            BorderBrush  = new SolidColorBrush(Color.FromArgb(180, 100, 160, 255)),
+            Background      = new SolidColorBrush(Color.FromArgb(235, 20, 20, 30)),
+            BorderBrush     = new SolidColorBrush(Color.FromArgb(180, 100, 160, 255)),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(8),
-            Child        = stack,
-            Visibility   = Visibility.Collapsed,
+            CornerRadius    = new CornerRadius(8),
+            MaxWidth        = 500,
+            Child           = content,
+            Visibility      = Visibility.Collapsed,
         };
+        popupBorderRef = _popupBorder;  // satisfy the close-button lambda
         OverlayCanvas.Children.Add(_popupBorder);
 
-        _popupTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(6) };
-        _popupTimer.Tick += (_, _) =>
-        {
-            _popupTimer.Stop();
-            _popupBorder.Visibility = Visibility.Collapsed;
-        };
+        // Timer is a no-op stub (popup is dismissed via the close button).
+        _popupTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(60) };
 
         // Hook WM_NCHITTEST after the native window is created
         SourceInitialized += OnSourceInitialized;
@@ -604,7 +628,12 @@ public sealed partial class OverlayWindow : Window, IOverlayWindow
         }
         else
         {
-            HideOverlay();
+            // Only hide if the click was not inside the visible popup
+            if (_popupBorder.Visibility != Visibility.Visible ||
+                !IsOverCanvasElement(_popupBorder, pos))
+            {
+                HideOverlay();
+            }
         }
     }
 
@@ -655,13 +684,14 @@ public sealed partial class OverlayWindow : Window, IOverlayWindow
 
     private void ShowLoadingPopupForText(string text, WordOverlay overlay, Point canvasPos)
     {
-        _popupReading.Text      = text;
+        bool isSingleToken   = text == overlay.SurfaceText;
+        bool hasReading      = isSingleToken
+                               && !string.IsNullOrWhiteSpace(overlay.Reading)
+                               && overlay.Reading != overlay.SurfaceText;
+        _popupReading.Text      = hasReading ? $"{text}  [{overlay.Reading}]" : text;
         _popupMeaning.Text      = "…";
         _popupBorder.Visibility = Visibility.Visible;
         PositionPopup(canvasPos);
-
-        _popupTimer.Stop();
-        _popupTimer.Start();
     }
 
     private Task DoLookupAsync(WordOverlay overlay, Point canvasPos, CancellationToken ct)
@@ -676,25 +706,12 @@ public sealed partial class OverlayWindow : Window, IOverlayWindow
 
         if (result is not null)
         {
-            // For single-token lookups, show reading in brackets if available.
-            bool isSingleToken = text == overlay.SurfaceText;
-            bool hasDifferentReading = isSingleToken
-                                       && !string.IsNullOrWhiteSpace(overlay.Reading)
-                                       && overlay.Reading != overlay.SurfaceText;
-
-            _popupReading.Text = hasDifferentReading
-                ? $"{text}  [{overlay.Reading}]"
-                : text;
-
             _popupMeaning.Text = result.Meaning;
         }
         else
         {
             _popupMeaning.Text = "(lookup failed — is the LLM server running?)";
         }
-
-        _popupTimer.Stop();
-        _popupTimer.Start();
     }
 
     private void PositionPopup(Point canvasPos)
@@ -734,7 +751,8 @@ public sealed partial class OverlayWindow : Window, IOverlayWindow
             short screenY = unchecked((short)((lParam.ToInt64() >> 16) & 0xFFFF));
 
             bool overBox = _overlays.Any(ov =>
-                ov.ScreenBoundingBox.Contains(screenX, screenY));
+                ov.ScreenBoundingBox.Contains(screenX, screenY))
+                || IsOverPopup(screenX, screenY);
 
             handled = true;
             return new IntPtr(overBox ? HTCLIENT : HTTRANSPARENT);
@@ -830,6 +848,121 @@ public sealed partial class OverlayWindow : Window, IOverlayWindow
         var pen = new Pen(CreateFrozenBrush(c), thickness);
         pen.Freeze();
         return pen;
+    }
+
+    // ── Popup hit-test helper ─────────────────────────────────────────────────
+
+    /// <summary>
+    /// Returns true when the physical-pixel point is inside the visible popup.
+    /// Used by WM_NCHITTEST so WPF mouse events reach the popup's buttons.
+    /// </summary>
+    private bool IsOverPopup(double screenX, double screenY)
+    {
+        if (_popupBorder.Visibility != Visibility.Visible)
+            return false;
+        double left   = Canvas.GetLeft(_popupBorder);
+        double top    = Canvas.GetTop(_popupBorder);
+        double sx1 = left                              * _dpiScaleX + _monitorX;
+        double sy1 = top                               * _dpiScaleY + _monitorY;
+        double sx2 = (left + _popupBorder.ActualWidth)  * _dpiScaleX + _monitorX;
+        double sy2 = (top  + _popupBorder.ActualHeight) * _dpiScaleY + _monitorY;
+        return screenX >= sx1 && screenX <= sx2 && screenY >= sy1 && screenY <= sy2;
+    }
+
+    /// <summary>
+    /// Returns true when a canvas logical-pixel point is inside a canvas-placed element.
+    /// </summary>
+    private static bool IsOverCanvasElement(FrameworkElement el, Point canvasPos)
+    {
+        double left = Canvas.GetLeft(el);
+        double top  = Canvas.GetTop(el);
+        return canvasPos.X >= left && canvasPos.X <= left + el.ActualWidth
+            && canvasPos.Y >= top  && canvasPos.Y <= top  + el.ActualHeight;
+    }
+
+    /// <summary>
+    /// Creates a small icon-button using Segoe MDL2 Assets glyphs.
+    /// Highlights white on hover; delegates click to <paramref name="onClick"/>.
+    /// </summary>
+    /// <summary>
+    /// Creates a copy-icon button that briefly shows an animated green tick on click
+    /// before fading back to the copy icon.
+    /// </summary>
+    private static TextBlock MakeCopyButton(Action copyAction)
+    {
+        const string CopyIcon  = "\uE8C8";   // Copy
+        const string CheckIcon = "\uE73E";   // Accept / checkmark
+
+        var dimFg = new SolidColorBrush(Color.FromArgb(180, 200, 200, 220));
+        var tb = new TextBlock
+        {
+            Text              = CopyIcon,
+            FontFamily        = new FontFamily("Segoe MDL2 Assets"),
+            FontSize          = 12,
+            Foreground        = dimFg,
+            Cursor            = Cursors.Hand,
+            Padding           = new Thickness(6, 2, 6, 2),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+
+        bool[] animating = { false };
+
+        tb.MouseEnter += (_, _) => { if (!animating[0]) tb.Foreground = Brushes.White; };
+        tb.MouseLeave += (_, _) => { if (!animating[0]) tb.Foreground = dimFg; };
+        tb.MouseLeftButtonDown += (_, e2) =>
+        {
+            copyAction();
+            e2.Handled   = true;
+            animating[0] = true;
+
+            tb.Text = CheckIcon;
+
+            // Animate: hold green for 350 ms, then fade to dim over 550 ms
+            var animBrush = new SolidColorBrush(Color.FromArgb(255, 80, 210, 100));
+            tb.Foreground = animBrush;
+
+            var anim = new ColorAnimation
+            {
+                From         = Color.FromArgb(255, 80, 210, 100),
+                To           = Color.FromArgb(180, 200, 200, 220),
+                BeginTime    = TimeSpan.FromMilliseconds(350),
+                Duration     = new Duration(TimeSpan.FromMilliseconds(550)),
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn },
+                FillBehavior = FillBehavior.HoldEnd,
+            };
+
+            anim.Completed += (_, _) =>
+            {
+                animBrush.BeginAnimation(SolidColorBrush.ColorProperty, null);
+                tb.Text       = CopyIcon;
+                tb.Foreground = dimFg;
+                animating[0]  = false;
+            };
+
+            animBrush.BeginAnimation(SolidColorBrush.ColorProperty, anim);
+        };
+
+        return tb;
+    }
+
+    private static TextBlock MakeIconButton(string icon, Action onClick)
+    {
+        var dimFg  = new SolidColorBrush(Color.FromArgb(180, 200, 200, 220));
+        var litFg  = Brushes.White;
+        var tb = new TextBlock
+        {
+            Text              = icon,
+            FontFamily        = new FontFamily("Segoe MDL2 Assets"),
+            FontSize          = 12,
+            Foreground        = dimFg,
+            Cursor            = Cursors.Hand,
+            Padding           = new Thickness(6, 2, 6, 2),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        tb.MouseLeftButtonDown += (_, e2) => { onClick(); e2.Handled = true; };
+        tb.MouseEnter += (_, _) => tb.Foreground = litFg;
+        tb.MouseLeave += (_, _) => tb.Foreground = dimFg;
+        return tb;
     }
 
     // Legacy helpers kept for any future callers
