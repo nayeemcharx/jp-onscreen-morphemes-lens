@@ -108,6 +108,7 @@ public partial class App : System.Windows.Application
         _trayService.Start();
 
         Log.Information("JPLens started. Hotkey: {H}", settings.Hotkey);
+        Log.Information("Use {H} to select a sentence range.","CTRL+LMB");
     }
 
     protected override void OnExit(ExitEventArgs e)

@@ -62,15 +62,17 @@
   </ItemGroup>
 
   <!-- MeCab dictionary files: the NuGet package's targets declare them as Content
-       with CopyToOutputDirectory, but with PublishSingleFile=true the SDK treats
-       .bin files as native binaries and bundles them into the EXE instead of placing
-       them next to it.  Use Update to override that behaviour for all dic files. -->
-  <ItemGroup>
-    <Content Update="$(MeCabPackageDefaultContentPath)\dic\*.*">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
-    </Content>
-  </ItemGroup>
+       items with their full NuGet cache path as the Include glob, inside a .targets
+       file.  That means any Content Update in the project body runs before those
+       items exist (project body items < .targets imports), so Update-based metadata
+       overrides silently do nothing.  Instead, use an explicit post-publish Target
+       that runs at execution time (after all items are fully resolved) to copy the
+       .bin files that the SDK otherwise treats as native binaries and embeds into
+       the single-file EXE rather than placing next to it. -->
+  <Target Name="CopyMeCabBinDicFiles" AfterTargets="Publish">
+    <Copy SourceFiles="$(MeCabPackageDefaultContentPath)\dic\char.bin;$(MeCabPackageDefaultContentPath)\dic\matrix.bin"
+          DestinationFolder="$(PublishDir)dic\"
+          SkipUnchangedFiles="true" />
+  </Target>
 
 </Project>
