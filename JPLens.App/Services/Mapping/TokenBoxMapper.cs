@@ -100,6 +100,7 @@ public sealed class TokenBoxMapper : ITokenBoxMapper
                 Confidence        = line.Confidence,
                 StartCharIndex    = token.StartCharIndex,
                 EndCharIndex      = token.EndCharIndex,
+                LineOrientation   = line.Orientation,
             });
         }
 

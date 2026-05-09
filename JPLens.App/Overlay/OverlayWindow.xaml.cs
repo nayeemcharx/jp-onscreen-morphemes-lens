@@ -232,78 +232,277 @@ public sealed partial class OverlayWindow : Window, IOverlayWindow
         const double rx = 7.0;
         const double ry = 7.0;
 
+        // ── Collect all rects that belong to the merged selection region ─────
+        // For each line that has a selected token, include ALL overlays on that
+        // line whose char range falls between the earliest and latest selected
+        // token on that line — this fills the visual gap between selected boxes.
+        var mergedRects = BuildMergedSelectionRects();
+
+        // Draw non-selected overlays first (background layer)
         foreach (var ov in _overlays)
         {
-            var r           = ToCanvasRect(ov.ScreenBoundingBox);
-            bool isHovered  = ReferenceEquals(ov, _hovered);
-            bool isSelected = _selected.Contains(ov);
+            if (_selected.Contains(ov) || mergedRects.Contains(ov))
+                continue;   // drawn as part of the merged selection region below
 
-            // ── 1. Base fill — frosted-glass body ─────────────────────────────
-            Color fillTop, fillBot;
-            if (isSelected)
+            var r          = ToCanvasRect(ov.ScreenBoundingBox);
+            bool isHovered = ReferenceEquals(ov, _hovered);
+
+            DrawSingleBox(dc, r, rx, ry, isHovered, isSelected: false);
+        }
+
+        // ── Draw merged selection region ─────────────────────────────────────
+        if (mergedRects.Count > 0)
+        {
+            // Build a StreamGeometry containing one rounded-rect figure per box.
+            // WPF fills the union automatically (NonZero fill rule).
+            var geo = new System.Windows.Media.StreamGeometry();
+            using (var ctx = geo.Open())
             {
-                fillTop = Color.FromArgb(110, 255, 210,  50);
-                fillBot = Color.FromArgb( 60, 200, 140,  20);
+                foreach (var ov in mergedRects)
+                {
+                    var r = ToCanvasRect(ov.ScreenBoundingBox);
+                    // Approximate rounded rect via arc segments
+                    AppendRoundedRectFigure(ctx, r, rx, ry);
+                }
             }
-            else if (isHovered)
+            geo.Freeze();
+
+            // Bounding rect of the whole selection for the gradient
+            Rect bounds = default;
+            foreach (var ov in mergedRects)
             {
-                fillTop = Color.FromArgb(100, 200, 225, 255);
-                fillBot = Color.FromArgb( 70,  90, 150, 230);
+                var r = ToCanvasRect(ov.ScreenBoundingBox);
+                bounds = bounds == default ? r : Rect.Union(bounds, r);
+            }
+
+            var selFill = new LinearGradientBrush(
+                new GradientStopCollection
+                {
+                    new GradientStop(Color.FromArgb(110, 255, 210,  50), 0.0),
+                    new GradientStop(Color.FromArgb( 60, 200, 140,  20), 1.0),
+                },
+                startPoint: new Point(0, 0), endPoint: new Point(0, 1));
+
+            dc.DrawGeometry(selFill, SelStroke, geo);
+
+            // Inner glow ring — slightly inset geometry
+            var geoInner = new System.Windows.Media.StreamGeometry();
+            using (var ctx = geoInner.Open())
+            {
+                foreach (var ov in mergedRects)
+                {
+                    var r = ToCanvasRect(ov.ScreenBoundingBox);
+                    var ri = new Rect(r.X + 1.5, r.Y + 1.5, r.Width - 3, r.Height - 3);
+                    AppendRoundedRectFigure(ctx, ri, rx - 1, ry - 1);
+                }
+            }
+            geoInner.Freeze();
+            dc.DrawGeometry(null, SelInner, geoInner);
+        }
+    }
+
+    // ── Line ordering helper ─────────────────────────────────────────────────
+
+    private sealed record LineGroup(
+        string              Key,
+        TextOrientation     Orientation,
+        List<WordOverlay>   Overlays);
+
+    /// <summary>
+    /// Returns all unique OCR lines from <paramref name="source"/> sorted in
+    /// natural Japanese reading order:
+    ///   Horizontal — top to bottom (ascending screen Y)
+    ///   Vertical   — right to left (descending screen X)
+    /// Mixed orientations: horizontal lines come before vertical ones.
+    /// </summary>
+    private static List<LineGroup> GetLinesInReadingOrder(IEnumerable<WordOverlay> source)
+    {
+        return source
+            .GroupBy(o => o.SourceLineText)
+            .Select(g =>
+            {
+                var orientation = g.First().LineOrientation;
+                double repX = g.Average(o => o.ScreenBoundingBox.X);
+                double repY = g.Average(o => o.ScreenBoundingBox.Y);
+                return (Group: new LineGroup(g.Key, orientation, g.ToList()), RepX: repX, RepY: repY);
+            })
+            .OrderBy(t => t.Group.Orientation == TextOrientation.Vertical ? 1 : 0)
+            .ThenBy(t => t.Group.Orientation  == TextOrientation.Horizontal ? t.RepY : -t.RepX)
+            .Select(t => t.Group)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Returns the set of overlays that should be drawn as part of the merged
+    /// selection region.
+    ///
+    /// Rule: find the first and last selected lines in reading order.  For the
+    /// first line include every overlay from the earliest selected token to the
+    /// end of that line; for the last line from the start to the latest selected
+    /// token; for any lines in between include all overlays on those lines.
+    /// Within each boundary line, gaps between the selected tokens are also
+    /// filled (so particles between two selected words are highlighted too).
+    /// </summary>
+    private HashSet<WordOverlay> BuildMergedSelectionRects()
+    {
+        if (_selected.Count == 0)
+            return [];
+
+        var allLines         = GetLinesInReadingOrder(_overlays);
+        var selectedLineKeys = _selected.Select(o => o.SourceLineText).ToHashSet();
+
+        // Indices of lines that contain at least one selected token
+        var selectedIndices = allLines
+            .Select((l, i) => (l, i))
+            .Where(t => selectedLineKeys.Contains(t.l.Key))
+            .Select(t => t.i)
+            .ToList();
+
+        if (selectedIndices.Count == 0)
+            return new HashSet<WordOverlay>(_selected);
+
+        int firstIdx = selectedIndices.Min();
+        int lastIdx  = selectedIndices.Max();
+
+        var result = new HashSet<WordOverlay>();
+
+        for (int i = firstIdx; i <= lastIdx; i++)
+        {
+            var line     = allLines[i];
+            bool isFirst  = i == firstIdx;
+            bool isLast   = i == lastIdx;
+            bool isSingle = isFirst && isLast;
+
+            // Determine char-index span to include on this line
+            int spanStart, spanEnd;
+
+            if (isSingle)
+            {
+                // Single line: fill only between the selected tokens
+                spanStart = _selected.Where(o => o.SourceLineText == line.Key).Min(o => o.StartCharIndex);
+                spanEnd   = _selected.Where(o => o.SourceLineText == line.Key).Max(o => o.EndCharIndex);
+            }
+            else if (isFirst)
+            {
+                // First line: from the first selected token to the end of the line
+                spanStart = _selected.Where(o => o.SourceLineText == line.Key).Min(o => o.StartCharIndex);
+                spanEnd   = int.MaxValue;
+            }
+            else if (isLast)
+            {
+                // Last line: from the start of the line to the last selected token
+                spanStart = 0;
+                spanEnd   = _selected.Where(o => o.SourceLineText == line.Key).Max(o => o.EndCharIndex);
             }
             else
             {
-                fillTop = Color.FromArgb( 55, 160, 200, 245);
-                fillBot = Color.FromArgb( 30,  60, 100, 200);
+                // Middle line: include everything
+                spanStart = 0;
+                spanEnd   = int.MaxValue;
             }
 
-            var bodyFill = new LinearGradientBrush(
-                new GradientStopCollection
-                {
-                    new GradientStop(fillTop, 0.0),
-                    new GradientStop(fillBot, 1.0),
-                },
-                startPoint: new Point(0, 0), endPoint: new Point(0, 1));
-
-            dc.DrawRoundedRectangle(bodyFill, null, r, rx, ry);
-
-            // ── 2. Specular highlight — top ~48 % of box ────────────────────
-            double specH = Math.Max(3.0, r.Height * 0.48);
-            var specRect = new Rect(r.X + 2, r.Y + 1, Math.Max(0, r.Width - 4), specH);
-            byte specAlpha1 = isSelected ? (byte)100 : isHovered ? (byte)130 : (byte)80;
-            byte specAlpha2 = isSelected ? (byte) 25 : isHovered ? (byte) 30  : (byte)15;
-            var specFill = new LinearGradientBrush(
-                new GradientStopCollection
-                {
-                    new GradientStop(Color.FromArgb(specAlpha1, 255, 255, 255), 0.0),
-                    new GradientStop(Color.FromArgb(specAlpha2, 255, 255, 255), 0.55),
-                    new GradientStop(Color.FromArgb(0, 255, 255, 255), 1.0),
-                },
-                startPoint: new Point(0, 0), endPoint: new Point(0, 1));
-
-            dc.DrawRoundedRectangle(specFill, null, specRect, rx - 1, ry - 1);
-
-            // ── 3. Bottom rim light — faint glow along the lower edge ────────
-            double rimH = Math.Max(2.0, r.Height * 0.22);
-            var rimRect = new Rect(r.X + 3, r.Bottom - rimH - 1, Math.Max(0, r.Width - 6), rimH);
-            Color rimColor = isSelected ? Color.FromArgb(50, 255, 200, 60) : Color.FromArgb(isHovered ? (byte)55 : (byte)28, 180, 220, 255);
-            var rimFill = new LinearGradientBrush(
-                new GradientStopCollection
-                {
-                    new GradientStop(Color.FromArgb(0, rimColor.R, rimColor.G, rimColor.B), 0.0),
-                    new GradientStop(rimColor, 1.0),
-                },
-                startPoint: new Point(0, 0), endPoint: new Point(0, 1));
-
-            dc.DrawRoundedRectangle(rimFill, null, rimRect, rx - 2, ry - 2);
-
-            // ── 4. Outer border + inner glow ring ──────────────────────────
-            Pen outerPen = isSelected ? SelStroke : isHovered ? HovStroke : BoxStroke;
-            Pen innerPen = isSelected ? SelInner  : isHovered ? HovInner  : BoxInner;
-            dc.DrawRoundedRectangle(null, outerPen, r, rx, ry);
-
-            var inner = new Rect(r.X + 1.5, r.Y + 1.5, r.Width - 3, r.Height - 3);
-            dc.DrawRoundedRectangle(null, innerPen, inner, rx - 1, ry - 1);
+            foreach (var ov in line.Overlays)
+                if (ov.StartCharIndex >= spanStart && ov.EndCharIndex <= spanEnd)
+                    result.Add(ov);
         }
+
+        return result;
+    }
+
+    private static void DrawSingleBox(DrawingContext dc, Rect r, double rx, double ry,
+                                      bool isHovered, bool isSelected)
+    {
+        Color fillTop, fillBot;
+        if (isSelected)
+        {
+            fillTop = Color.FromArgb(110, 255, 210,  50);
+            fillBot = Color.FromArgb( 60, 200, 140,  20);
+        }
+        else if (isHovered)
+        {
+            fillTop = Color.FromArgb(100, 200, 225, 255);
+            fillBot = Color.FromArgb( 70,  90, 150, 230);
+        }
+        else
+        {
+            fillTop = Color.FromArgb( 55, 160, 200, 245);
+            fillBot = Color.FromArgb( 30,  60, 100, 200);
+        }
+
+        var bodyFill = new LinearGradientBrush(
+            new GradientStopCollection
+            {
+                new GradientStop(fillTop, 0.0),
+                new GradientStop(fillBot, 1.0),
+            },
+            startPoint: new Point(0, 0), endPoint: new Point(0, 1));
+
+        dc.DrawRoundedRectangle(bodyFill, null, r, rx, ry);
+
+        double specH = Math.Max(3.0, r.Height * 0.48);
+        var specRect = new Rect(r.X + 2, r.Y + 1, Math.Max(0, r.Width - 4), specH);
+        byte specAlpha1 = isHovered ? (byte)130 : (byte)80;
+        byte specAlpha2 = isHovered ? (byte) 30 : (byte)15;
+        var specFill = new LinearGradientBrush(
+            new GradientStopCollection
+            {
+                new GradientStop(Color.FromArgb(specAlpha1, 255, 255, 255), 0.0),
+                new GradientStop(Color.FromArgb(specAlpha2, 255, 255, 255), 0.55),
+                new GradientStop(Color.FromArgb(0, 255, 255, 255), 1.0),
+            },
+            startPoint: new Point(0, 0), endPoint: new Point(0, 1));
+
+        dc.DrawRoundedRectangle(specFill, null, specRect, rx - 1, ry - 1);
+
+        double rimH = Math.Max(2.0, r.Height * 0.22);
+        var rimRect = new Rect(r.X + 3, r.Bottom - rimH - 1, Math.Max(0, r.Width - 6), rimH);
+        Color rimColor = Color.FromArgb(isHovered ? (byte)55 : (byte)28, 180, 220, 255);
+        var rimFill = new LinearGradientBrush(
+            new GradientStopCollection
+            {
+                new GradientStop(Color.FromArgb(0, rimColor.R, rimColor.G, rimColor.B), 0.0),
+                new GradientStop(rimColor, 1.0),
+            },
+            startPoint: new Point(0, 0), endPoint: new Point(0, 1));
+
+        dc.DrawRoundedRectangle(rimFill, null, rimRect, rx - 2, ry - 2);
+
+        Pen outerPen = isHovered ? HovStroke : BoxStroke;
+        Pen innerPen = isHovered ? HovInner  : BoxInner;
+        dc.DrawRoundedRectangle(null, outerPen, r, rx, ry);
+
+        var inner = new Rect(r.X + 1.5, r.Y + 1.5, r.Width - 3, r.Height - 3);
+        dc.DrawRoundedRectangle(null, innerPen, inner, rx - 1, ry - 1);
+    }
+
+    /// <summary>
+    /// Appends a rounded-rectangle figure to an open StreamGeometryContext.
+    /// </summary>
+    private static void AppendRoundedRectFigure(
+        System.Windows.Media.StreamGeometryContext ctx,
+        Rect r, double rx, double ry)
+    {
+        // Clamp radii
+        rx = Math.Min(rx, r.Width  / 2);
+        ry = Math.Min(ry, r.Height / 2);
+
+        bool isStroked = true;
+        bool isFilled  = true;
+        var arcSize    = new System.Windows.Size(rx, ry);
+
+        ctx.BeginFigure(new Point(r.Left + rx, r.Top), isFilled, isClosed: true);
+        ctx.LineTo(new Point(r.Right - rx, r.Top),    isStroked, isSmoothJoin: false);
+        ctx.ArcTo (new Point(r.Right, r.Top + ry),    arcSize, 0, false,
+                   System.Windows.Media.SweepDirection.Clockwise, isStroked, isSmoothJoin: false);
+        ctx.LineTo(new Point(r.Right, r.Bottom - ry), isStroked, isSmoothJoin: false);
+        ctx.ArcTo (new Point(r.Right - rx, r.Bottom), arcSize, 0, false,
+                   System.Windows.Media.SweepDirection.Clockwise, isStroked, isSmoothJoin: false);
+        ctx.LineTo(new Point(r.Left + rx, r.Bottom),  isStroked, isSmoothJoin: false);
+        ctx.ArcTo (new Point(r.Left, r.Bottom - ry),  arcSize, 0, false,
+                   System.Windows.Media.SweepDirection.Clockwise, isStroked, isSmoothJoin: false);
+        ctx.LineTo(new Point(r.Left, r.Top + ry),     isStroked, isSmoothJoin: false);
+        ctx.ArcTo (new Point(r.Left + rx, r.Top),     arcSize, 0, false,
+                   System.Windows.Media.SweepDirection.Clockwise, isStroked, isSmoothJoin: false);
     }
 
     // ── Mouse event handlers (wired in XAML) ─────────────────────────────────
@@ -329,9 +528,35 @@ public sealed partial class OverlayWindow : Window, IOverlayWindow
 
         if (hit is not null && (Keyboard.Modifiers & ModifierKeys.Control) != 0)
         {
-            // Ctrl+Click — toggle selection
-            if (!_selected.Remove(hit))
+            var merged = _selected.Count > 0 ? BuildMergedSelectionRects() : [];
+
+            if (_selected.Count > 0 && merged.Contains(hit))
+            {
+                // The clicked word is inside the current merged region.
+                // Trim the explicit selection to [first..hit] in reading order,
+                // dropping everything that comes strictly after the clicked word.
+                var lineRank = GetLinesInReadingOrder(_overlays)
+                    .Select((l, i) => (l.Key, i))
+                    .ToDictionary(t => t.Key, t => t.i);
+
+                int hitLine = lineRank.GetValueOrDefault(hit.SourceLineText, 0);
+
+                _selected.RemoveWhere(ov =>
+                {
+                    int ovLine = lineRank.GetValueOrDefault(ov.SourceLineText, 0);
+                    if (ovLine != hitLine) return ovLine > hitLine;
+                    return ov.StartCharIndex > hit.StartCharIndex;
+                });
+
+                // Make the clicked word itself explicitly selected
                 _selected.Add(hit);
+            }
+            else
+            {
+                // Outside the current region — normal toggle
+                if (!_selected.Remove(hit))
+                    _selected.Add(hit);
+            }
 
             InvalidateVisual();
             e.Handled = true;
@@ -346,12 +571,14 @@ public sealed partial class OverlayWindow : Window, IOverlayWindow
 
             if (_selected.Count > 0)
             {
-                textToLookup        = BuildCombinedText(_selected);
+                // Use the merged set (includes gap-filled tokens) for text reconstruction
+                var merged = BuildMergedSelectionRects();
+                textToLookup          = BuildCombinedText(merged);
                 representativeOverlay = hit;
             }
             else
             {
-                textToLookup        = hit.SurfaceText;
+                textToLookup          = hit.SurfaceText;
                 representativeOverlay = hit;
             }
 
@@ -370,31 +597,40 @@ public sealed partial class OverlayWindow : Window, IOverlayWindow
     }
 
     /// <summary>
-    /// Reconstructs the combined source text spanning all selected overlays.
-    /// For overlays on the same line, extracts the substring from the earliest
-    /// StartCharIndex to the latest EndCharIndex, which naturally includes any
-    /// particles/prepositions between them.
-    /// For overlays on different lines, concatenates their surface texts.
+    /// Reconstructs the combined source text from the merged overlay set.
+    /// Lines are emitted in reading order.  For each line the substring of
+    /// <see cref="WordOverlay.SourceLineText"/> from the earliest to the latest
+    /// char index present in <paramref name="merged"/> is used, so particles
+    /// and other filtered tokens that sit between two visible tokens are
+    /// naturally included.
     /// </summary>
-    private static string BuildCombinedText(IEnumerable<WordOverlay> overlays)
+    private string BuildCombinedText(HashSet<WordOverlay> merged)
     {
-        // Group by source line
-        var byLine = overlays
-            .GroupBy(o => o.SourceLineText)
-            .OrderBy(g => g.Min(o => o.StartCharIndex))
-            .ToList();
+        if (merged.Count == 0)
+            return string.Empty;
+
+        // Use the global line order so lines appear in the correct reading sequence
+        var allLines         = GetLinesInReadingOrder(_overlays);
+        var mergedLineKeys   = merged.Select(o => o.SourceLineText).ToHashSet();
 
         var parts = new System.Text.StringBuilder();
-        foreach (var group in byLine)
+
+        foreach (var line in allLines)
         {
-            int start = group.Min(o => o.StartCharIndex);
-            int end   = group.Max(o => o.EndCharIndex);
-            string lineText = group.Key;
+            if (!mergedLineKeys.Contains(line.Key))
+                continue;
+
+            int start    = merged.Where(o => o.SourceLineText == line.Key).Min(o => o.StartCharIndex);
+            int end      = merged.Where(o => o.SourceLineText == line.Key).Max(o => o.EndCharIndex);
+            string lineText = line.Key;
 
             if (start >= 0 && end > start && end <= lineText.Length)
                 parts.Append(lineText, start, end - start);
             else
-                parts.Append(string.Join(string.Empty, group.Select(o => o.SurfaceText)));
+                parts.Append(string.Join(string.Empty,
+                    merged.Where(o => o.SourceLineText == line.Key)
+                          .OrderBy(o => o.StartCharIndex)
+                          .Select(o => o.SurfaceText)));
         }
 
         return parts.ToString();

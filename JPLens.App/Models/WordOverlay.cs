@@ -36,10 +36,13 @@ public sealed class WordOverlay
     public double    Confidence         { get; init; }
 
     /// <summary>Character start index of this token within <see cref="SourceLineText"/>.</summary>
-    public int       StartCharIndex     { get; init; }
+    public int             StartCharIndex     { get; init; }
 
     /// <summary>Character end index (exclusive) of this token within <see cref="SourceLineText"/>.</summary>
-    public int       EndCharIndex       { get; init; }
+    public int             EndCharIndex       { get; init; }
+
+    /// <summary>Reading orientation of the source OCR line.</summary>
+    public TextOrientation LineOrientation    { get; init; }
 
     /// <summary>
     /// Returns the text that should be copied to the clipboard, based on the
