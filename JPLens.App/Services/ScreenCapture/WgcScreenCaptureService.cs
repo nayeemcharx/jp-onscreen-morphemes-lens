@@ -148,11 +148,16 @@ public sealed class WgcScreenCaptureService : IScreenCaptureService, IDisposable
         // routes the event through a DispatcherQueue, which doesn't exist on a plain
         // .NET thread-pool thread (Task.Run), causing the event to never fire and the
         // capture to time out.
+        // Use the primary monitor's known pixel dimensions rather than item.Size.
+        // On multi-monitor setups item.Size can reflect the combined virtual-desktop
+        // size, causing the frame pool to allocate a surface wide enough to cover all
+        // monitors and deliver pixels from secondary monitors alongside the primary.
+        var primarySize = new Windows.Graphics.SizeInt32(monitor.Width, monitor.Height);
         using var framePool = Direct3D11CaptureFramePool.CreateFreeThreaded(
             _d3dDevice,
             DirectXPixelFormat.B8G8R8A8UIntNormalized,
             numberOfBuffers: 1,
-            item.Size);
+            primarySize);
 
         using var session = framePool.CreateCaptureSession(item);
 
@@ -203,13 +208,16 @@ public sealed class WgcScreenCaptureService : IScreenCaptureService, IDisposable
             // those extra rows/columns contain stale pixels from previous frames or
             // adjacent-monitor GPU memory — exactly the garbage text the OCR sees.
             var contentSize = capturedFrame.ContentSize;
-            int contentW    = contentSize.Width;
-            int contentH    = contentSize.Height;
+            // Clamp to the primary monitor's physical dimensions: ContentSize may
+            // still exceed the monitor bounds when the compositor delivers a surface
+            // that spans multiple monitors (alignment or virtual-desktop artefact).
+            int contentW    = Math.Min(contentSize.Width,  monitor.Width);
+            int contentH    = Math.Min(contentSize.Height, monitor.Height);
 
-            if (contentW != monitor.Width || contentH != monitor.Height)
+            if (contentSize.Width != monitor.Width || contentSize.Height != monitor.Height)
                 _logger.LogDebug(
-                    "WGC: surface {SW}×{SH} → content {CW}×{CH} (alignment padding trimmed)",
-                    monitor.Width, monitor.Height, contentW, contentH);
+                    "WGC: surface {SW}×{SH} → content {CW}×{CH} (clamped to primary monitor)",
+                    contentSize.Width, contentSize.Height, contentW, contentH);
 
             var bitmap = ConvertFrameToBitmap(capturedFrame, contentW, contentH);
 

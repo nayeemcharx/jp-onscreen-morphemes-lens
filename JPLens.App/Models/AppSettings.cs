@@ -18,6 +18,25 @@ public sealed class AppSettings
     public double MinimumOcrConfidence { get; set; } = 0.60;
 
     /// <summary>
+    /// When True (default), the screen is sliced into 7 crops
+    /// before OCR.
+    /// </summary>
+    /// 
+    public bool OcrMultipleCrops { get; set; } = false;
+    /// <summary>
+    /// When false (default), the screen is sliced into 7 horizontal bands
+    /// (3 thirds + 4 quarters, all full-width) before OCR.
+    /// When true, slices are vertical (3 thirds + 4 quarters, all full-height).
+    /// Use vertical mode for content that is arranged in columns
+    /// (e.g. visual-novel dialogue boxes stacked side-by-side).
+    /// </summary>
+    
+    
+    public bool OcrVertical { get; set; } = false;
+
+
+
+    /// <summary>
     /// Upscale factor applied to the captured frame before OCR.
     /// 1.0 = raw passthrough (recommended — identical to Win+Shift+T behaviour).
     /// The engine clamps automatically so that neither dimension exceeds 4096 px.
@@ -101,13 +120,7 @@ public sealed class AppSettings
     /// <summary>Tokens shorter than this many characters are not displayed.</summary>
     public int MinimumTokenLength { get; set; } = 1;
 
-    // ── Clipboard ─────────────────────────────────────────────────────────────
-
-    /// <summary>
-    /// When true, clicking a word copies the dictionary form instead of the surface form.
-    /// </summary>
-    public bool CopyDictionaryForm { get; set; } = false;
-
+   
     // ── Overlay ───────────────────────────────────────────────────────────────
 
     /// <summary>Extra padding (physical pixels) added around each token box.</summary>

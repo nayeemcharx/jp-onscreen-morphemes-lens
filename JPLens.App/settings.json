@@ -1,0 +1,34 @@
+{
+  
+  "MinimumOcrConfidence": 0.6,
+  "OcrMultipleCrops": false,
+  "OcrVertical": false,
+  "OcrScale": 1.0,
+  "OcrContrast": 1.0,
+  "OcrSharpening": true,
+  "OcrGrayscale": false,
+
+  
+
+  "ShowPunctuation": false, 
+  "ShowAuxiliarySymbols": false,
+  "ShowWhitespaceTokens": false,
+  "ShowParticles": true,
+  "MinimumTokenLength": 1,
+
+
+  "OverlayPadding": 3,
+  "Hotkey": "CTRL+SHIFT+J",
+
+
+
+  "PrimaryMonitorOnly": false,
+
+  "SudachiServerUrl": "http://localhost:8000",
+  "LlmServerUrl": "http://localhost:8100",
+
+  "PaddleDetModelPath": "models\\paddle\\det_model.onnx",
+  "PaddleRecModelPath": "models\\paddle\\rec_model.onnx",
+  "PaddleClsModelPath": "models\\paddle\\cls_model.onnx",
+  "PaddleDictPath": "models\\paddle\\japan_dict.txt"
+}

@@ -81,7 +81,9 @@ public sealed class WindowsOcrService : IOcrService
         // every bounding box lives in the same coordinate space after the offset
         // correction below.  Duplicates produced by the overlap are eliminated by
         // OverlayPostProcessor.RemoveDuplicates after tokenisation.
-        var slices   = GetSlices(frame.Image.Width, frame.Image.Height);
+        var slices   = GetSlices(frame.Image.Width, frame.Image.Height, _settings.OcrMultipleCrops, _settings.OcrVertical);
+        _logger.LogDebug("Screen capture split into {N} slices (multipleCrops={M}, vertical={V})",
+            slices.Count, _settings.OcrMultipleCrops, _settings.OcrVertical);
         _logger.LogInformation("Running OCR on {N} slices (preprocessed={P})",
             slices.Count, needsPreprocess);
         var allLines = new List<OcrLine>();
@@ -109,7 +111,7 @@ public sealed class WindowsOcrService : IOcrService
                 "Slice {I}/{N} ({X},{Y}) {SW}×{SH} → OCR image {OW}×{OH}",
                 si + 1, slices.Count, sliceX, sliceY, sliceW, sliceH,
                 bitmapForOcr.Width, bitmapForOcr.Height);
-
+            // SaveDebugImage(bitmapForOcr);
             using var softwareBitmap = await ConvertToSoftwareBitmapAsync(bitmapForOcr);
             preprocessed?.Dispose();
 
@@ -145,39 +147,59 @@ public sealed class WindowsOcrService : IOcrService
 
     /// <summary>
     /// Returns the 6 slice rectangles used for multi-pass OCR.
-    /// Order: full image, 3 horizontal thirds (top/mid/bottom), 2 vertical halves (left/right).
+    /// When <paramref name="vertical"/> is false: 7 horizontal bands (3 thirds + 4 quarters).
+    /// When <paramref name="vertical"/> is true:  7 vertical bands (3 thirds + 4 quarters).
     /// </summary>
-    private static List<(int X, int Y, int W, int H)> GetSlices(int width, int height)
+    private static List<(int X, int Y, int W, int H)> GetSlices(int width, int height, bool ocrMultipleCrops, bool vertical)
     {
-        int h3 = height / 3;
-        int h4 = height / 4;
-        int w3 = width  / 3;
-        int w4 = width  / 4;
+        
+        if(!ocrMultipleCrops)
+        {
+            return
+            [
+                (0, 0, width, height)
+            ];
+        }
+       
+        if (vertical)
+        {
+            int w3 = width / 3;
+            int w4 = width / 4;
 
-        return
-        [
-            // Horizontal thirds (full width, 1/3 height each)
-            (0,      0,       width,  h3             ),
-            (0,      h3,      width,  h3             ),
-            (0,      h3 * 2,  width,  height - h3*2  ),
+            return
+            [
+                // Vertical thirds (1/3 width, full height each)
+                (0,       0,  w3,             height),
+                (w3,      0,  w3,             height),
+                (w3 * 2,  0,  width - w3 * 2, height),
 
-            // Horizontal quarters (full width, 1/4 height each)
-            (0,      0,       width,  h4             ),
-            (0,      h4,      width,  h4             ),
-            (0,      h4 * 2,  width,  h4             ),
-            (0,      h4 * 3,  width,  height - h4*3  ),
+                // Vertical quarters (1/4 width, full height each)
+                (0,       0,  w4,             height),
+                (w4,      0,  w4,             height),
+                (w4 * 2,  0,  w4,             height),
+                (w4 * 3,  0,  width - w4 * 3, height),
+            ];
+        }
+        else
+        {
+            int h3 = height / 3;
+            int h4 = height / 4;
 
-            //// Vertical thirds (1/3 width, full height each)
-            //(0,      0,       w3,             height         ),
-            //(w3,     0,       w3,             height         ),
-            //(w3 * 2, 0,       width - w3 * 2, height         ),
+            return
+            [
+                // Horizontal thirds (full width, 1/3 height each)
+                (0,  0,       width,  h3            ),
+                (0,  h3,      width,  h3            ),
+                (0,  h3 * 2,  width,  height - h3*2 ),
 
-            //// Vertical quarters (1/4 width, full height each)
-            //(0,      0,       w4,             height         ),
-            //(w4,     0,       w4,             height         ),
-            //(w4 * 2, 0,       w4,             height         ),
-            //(w4 * 3, 0,       width - w4 * 3, height         ),
-        ];
+                // Horizontal quarters (full width, 1/4 height each)
+                (0,  0,       width,  h4            ),
+                (0,  h4,      width,  h4            ),
+                (0,  h4 * 2,  width,  h4            ),
+                (0,  h4 * 3,  width,  height - h4*3 ),
+                
+            ];
+        }
     }
 
     /// <summary>Creates a cropped copy of <paramref name="source"/>.</summary>

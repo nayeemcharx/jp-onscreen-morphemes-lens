@@ -61,6 +61,15 @@
              Condition="Exists('models\paddle')" />
   </ItemGroup>
 
+  <!-- Default settings file: shipped next to the executable.
+       SettingsService loads from %AppData%\JPLens\settings.json first; if that
+       file does not exist it falls back to this file so users have an editable
+       reference on first install. -->
+  <ItemGroup>
+    <Content Include="settings.json" CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <!-- MeCab dictionary files: the NuGet package's targets declare them as Content
        items with their full NuGet cache path as the Include glob, inside a .targets
        file.  That means any Content Update in the project body runs before those
