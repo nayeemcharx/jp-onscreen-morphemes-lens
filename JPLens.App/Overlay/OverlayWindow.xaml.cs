@@ -388,6 +388,25 @@ public sealed partial class OverlayWindow : Window, IOverlayWindow
         int firstIdx = selectedIndices.Min();
         int lastIdx  = selectedIndices.Max();
 
+        // Compute the bounding box of the first and last selected lines so that
+        // intermediate lines that belong to a completely separate visual column
+        // (e.g. right-side text block) can be excluded.
+        static (double MinX, double MaxX, double MinY, double MaxY) LineBounds(LineGroup line)
+        {
+            double minX = line.Overlays.Min(o => o.ScreenBoundingBox.X);
+            double maxX = line.Overlays.Max(o => o.ScreenBoundingBox.Right);
+            double minY = line.Overlays.Min(o => o.ScreenBoundingBox.Y);
+            double maxY = line.Overlays.Max(o => o.ScreenBoundingBox.Bottom);
+            return (minX, maxX, minY, maxY);
+        }
+
+        var (f1, f2, f3, f4) = LineBounds(allLines[firstIdx]);
+        var (l1, l2, l3, l4) = LineBounds(allLines[lastIdx]);
+        double anchorMinX = Math.Min(f1, l1);
+        double anchorMaxX = Math.Max(f2, l2);
+        double anchorMinY = Math.Min(f3, l3);
+        double anchorMaxY = Math.Max(f4, l4);
+
         var result = new HashSet<WordOverlay>();
 
         for (int i = firstIdx; i <= lastIdx; i++)
@@ -396,6 +415,20 @@ public sealed partial class OverlayWindow : Window, IOverlayWindow
             bool isFirst  = i == firstIdx;
             bool isLast   = i == lastIdx;
             bool isSingle = isFirst && isLast;
+
+            // Skip intermediate lines whose bounding box does not overlap the
+            // column/row span of the two anchor lines.  This prevents text
+            // blocks that are spatially far away (e.g. a right-side column)
+            // from being swept into the selection just because their Y position
+            // happens to fall between the two selected lines in reading order.
+            if (!isFirst && !isLast)
+            {
+                var (lMinX, lMaxX, lMinY, lMaxY) = LineBounds(line);
+                bool xOverlap = lMaxX >= anchorMinX && lMinX <= anchorMaxX;
+                bool yOverlap = lMaxY >= anchorMinY && lMinY <= anchorMaxY;
+                if (!xOverlap || !yOverlap)
+                    continue;
+            }
 
             // Determine char-index span to include on this line
             int spanStart, spanEnd;
